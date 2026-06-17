@@ -12,9 +12,9 @@ public class Config {
 
     private List<String> invidiousInstances;
     private List<String> yt2009Instances;
+    private List<String> pipedInstances;
     private List<String> ytApiLegacyInstances;
     private String preferredQuality;
-    private boolean enableS60Tube;
     private boolean updateInstancesFromUrl;
     private String instancesUpdateUrl;
     private int updateFrequency;
@@ -24,11 +24,14 @@ public class Config {
     private boolean convertVideos;
     private int convertCodec;
     private boolean asyncSetVideoUri;
+    private boolean fullscreenRotateLandscape;
 
     public Config() {
         invidiousInstances = new ArrayList<String>();
         yt2009Instances = new ArrayList<String>();
+        pipedInstances = new ArrayList<String>();
         ytApiLegacyInstances = new ArrayList<String>();
+        fullscreenRotateLandscape = true;
     }
 
     /**
@@ -37,9 +40,9 @@ public class Config {
     public Config(Config other) {
         invidiousInstances = new ArrayList<String>(other.invidiousInstances);
         yt2009Instances = new ArrayList<String>(other.yt2009Instances);
+        pipedInstances = new ArrayList<String>(other.pipedInstances);
         ytApiLegacyInstances = new ArrayList<String>(other.ytApiLegacyInstances);
         preferredQuality = other.preferredQuality;
-        enableS60Tube = other.enableS60Tube;
         updateInstancesFromUrl = other.updateInstancesFromUrl;
         instancesUpdateUrl = other.instancesUpdateUrl;
         updateFrequency = other.updateFrequency;
@@ -49,6 +52,7 @@ public class Config {
         convertVideos = other.convertVideos;
         convertCodec = other.convertCodec;
         asyncSetVideoUri = other.asyncSetVideoUri;
+        fullscreenRotateLandscape = other.fullscreenRotateLandscape;
     }
 
     public List<String> getInvidiousInstances() {
@@ -67,6 +71,14 @@ public class Config {
         this.yt2009Instances = instances;
     }
 
+    public List<String> getPipedInstances() {
+        return pipedInstances;
+    }
+
+    public void setPipedInstances(List<String> instances) {
+        this.pipedInstances = instances;
+    }
+
     public List<String> getYtApiLegacyInstances() {
         return ytApiLegacyInstances;
     }
@@ -81,14 +93,6 @@ public class Config {
 
     public void setPreferredQuality(String quality) {
         this.preferredQuality = quality;
-    }
-
-    public boolean isS60TubeEnabled() {
-        return enableS60Tube;
-    }
-
-    public void setS60TubeEnabled(boolean enable) {
-        this.enableS60Tube = enable;
     }
 
     public boolean isUpdateInstancesFromUrl() {
@@ -163,17 +167,25 @@ public class Config {
         this.asyncSetVideoUri = asyncSetVideoUri;
     }
 
+    public boolean isFullscreenRotateLandscape() {
+        return fullscreenRotateLandscape;
+    }
+
+    public void setFullscreenRotateLandscape(boolean rotate) {
+        this.fullscreenRotateLandscape = rotate;
+    }
+
     /**
      * Add default instance. Called by ConfigManager.ensureInstancesConfigured()
      * when all instance lists are empty.
      */
     public void applyDefaults() {
-        ytApiLegacyInstances.add("http://yt.modyleprojects.ru");
-        ytApiLegacyInstances.add("http://yt.swlbst.ru");
+        ytApiLegacyInstances.add("http://45.132.96.44:2823");
 
         updateInstancesFromUrl = true;
         instancesUpdateUrl = "http://144.31.189.129/notPipe.json";
         updateFrequency = 1;
         streamPlayback = true;
+        fullscreenRotateLandscape = true;
     }
 }

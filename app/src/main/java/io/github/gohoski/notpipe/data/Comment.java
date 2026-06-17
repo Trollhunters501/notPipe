@@ -7,13 +7,14 @@ import java.util.Date;
  */
 
 public class Comment {
-    public final String channel, channelThumbnail, content;
+    public final String channel, channelThumbnail, content, channelId;
     public final Date publishedAt;
 
-    public Comment(String channel, String channelThumbnail, String content, Date publishedAt) {
+    public Comment(String channel, String channelThumbnail, String content, Date publishedAt, String channelId) {
         this.channel = channel;
         this.channelThumbnail = channelThumbnail;
         this.content = content;
         this.publishedAt = publishedAt;
+        this.channelId = channelId;
     }
 }

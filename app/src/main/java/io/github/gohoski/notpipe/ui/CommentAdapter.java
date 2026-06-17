@@ -35,7 +35,7 @@ public class CommentAdapter extends ArrayAdapter<Comment> {
 
         if (row == null) {
             LayoutInflater inflater = ((Activity) context).getLayoutInflater();
-            row = inflater.inflate(R.layout.comment_item, parent, false);
+            row = inflater.inflate(R.layout.item_comment, parent, false);
             holder = new ViewHolder();
             holder.channelTitle = (TextView) row.findViewById(R.id.channel_title);
             holder.content = (TextView) row.findViewById(R.id.content);

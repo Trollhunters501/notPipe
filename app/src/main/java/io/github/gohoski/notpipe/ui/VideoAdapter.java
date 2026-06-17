@@ -71,25 +71,31 @@ public class VideoAdapter extends ArrayAdapter<VideoInfo> {
         }
 
         final VideoInfo video = getItem(position);
+
+        if (layoutResource == R.layout.item_video_compact && (video.views <= 0 || video.publishedAt == null)) {
+            holder.videoTitle.setMaxLines(3);
+        } else {
+            holder.videoTitle.setMaxLines(2);
+        }
         holder.videoTitle.setText(video.title);
 
         if (video.views > 0) {
             String viewsText = Utils.formatNumber(context, video.views);
-            if (layoutResource == R.layout.video_item) {
+            if (layoutResource == R.layout.item_video) {
                 holder.channelTitle.setText(video.channel + " · " + context.getString(R.string.views, viewsText) + (video.publishedAt == null ? "" : " · " + Utils.formatTimeAgo(context, video.publishedAt)));
-            } else if (layoutResource == R.layout.video_item_compact) {
+            } else if (layoutResource == R.layout.item_video_compact) {
                 if (isInChannelActivity) {
                     holder.channelTitle.setText(context.getString(R.string.views, viewsText) + (video.publishedAt == null ? "" : "\n" + Utils.formatTimeAgo(context, video.publishedAt)));
                 } else {
-                    holder.channelTitle.setText(video.channel + "\n" + context.getString(R.string.views, viewsText) + (video.publishedAt == null ? "" : " · " + Utils.formatTimeAgo(context, video.publishedAt)));
+                    holder.channelTitle.setText(video.channel + "\n" + viewsText + (video.publishedAt == null ? "" : " · " + Utils.formatTimeAgo(context, video.publishedAt)));
                 }
             } else {
                 holder.channelTitle.setText(video.channel);
             }
         } else {
-            if (layoutResource == R.layout.video_item) {
+            if (layoutResource == R.layout.item_video) {
                 holder.channelTitle.setText(video.channel);
-            } else if (layoutResource == R.layout.video_item_compact) {
+            } else if (layoutResource == R.layout.item_video_compact) {
                 holder.channelTitle.setText(isInChannelActivity ? "" : video.channel);
             } else {
                 holder.channelTitle.setText(video.channel);

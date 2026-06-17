@@ -16,7 +16,6 @@ import android.widget.Toast;
 import io.github.gohoski.notpipe.api.Manager;
 import io.github.gohoski.notpipe.config.Config;
 import io.github.gohoski.notpipe.config.ConfigManager;
-import io.github.gohoski.notpipe.ui.FixedApiRow;
 import io.github.gohoski.notpipe.ui.InstanceSection;
 import io.github.gohoski.notpipe.util.InstancesUpdater;
 
@@ -25,27 +24,27 @@ import io.github.gohoski.notpipe.util.InstancesUpdater;
  * API instances are added programmatically, general settings are in the layout.
  */
 public class SettingsActivity extends Activity implements InstancesUpdater.OnInstancesUpdatedListener {
-    
     private LinearLayout apiInstancesContainer;
     private CheckBox updateInstancesChk, streamPlaybackChk, convertVideosChk, asyncUriChk;
+    private CheckBox fullscreenRotateChk;
     private LinearLayout updateInstancesLayout, convertLayout;
     private EditText instancesUrlEdit;
     private Spinner updateFreqSpinner, playerSpinner, codecSpinner;
     private Spinner qualitySpinner;
-    private FixedApiRow s60TubeRow;
     private InstanceSection invidiousSection;
     private InstanceSection ytApiLegacySection;
     private InstanceSection yt2009Section;
-    
+    private InstanceSection pipedSection;
+
     private ConfigManager configManager;
     private Config config;
     private Context context;
-    
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
-        
+
         context = this;
         configManager = ConfigManager.getInstance();
         config = configManager.getConfig();
@@ -62,6 +61,7 @@ public class SettingsActivity extends Activity implements InstancesUpdater.OnIns
         convertVideosChk = (CheckBox) findViewById(R.id.convert_chk);
         convertLayout = (LinearLayout) findViewById(R.id.codec_layout);
         asyncUriChk = (CheckBox) findViewById(R.id.async_uri_chk);
+        fullscreenRotateChk = (CheckBox) findViewById(R.id.fullscreen_rotate_chk); // Bind UI
 
         updateInstancesChk.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
@@ -83,12 +83,10 @@ public class SettingsActivity extends Activity implements InstancesUpdater.OnIns
                     playerSpinner.setSelection(0);
                     streamPlaybackChk.setChecked(false);
                     qualitySpinner.setEnabled(false);
-//                    playerSpinner.setEnabled(false);
                     streamPlaybackChk.setEnabled(false);
                 } else {
                     convertLayout.setVisibility(View.GONE);
                     qualitySpinner.setEnabled(true);
-//                    playerSpinner.setEnabled(true);
                     streamPlaybackChk.setEnabled(true);
                     if (NotPipe.SDK < 11) {
                         playerSpinner.setSelection(1);
@@ -120,22 +118,22 @@ public class SettingsActivity extends Activity implements InstancesUpdater.OnIns
         convertVideosChk.setChecked(config.isConvertVideos());
         codecSpinner.setSelection(config.getConvertCodec());
         asyncUriChk.setChecked(config.isAsyncSetVideoUri());
+        fullscreenRotateChk.setChecked(config.isFullscreenRotateLandscape());
 
         if (config.isConvertVideos()) {
             qualitySpinner.setEnabled(false);
-//            playerSpinner.setEnabled(false);
             streamPlaybackChk.setEnabled(false);
         }
 
         invidiousSection = new InstanceSection(context, "Invidious", config.getInvidiousInstances());
         ytApiLegacySection = new InstanceSection(context, "YtAPILegacy", config.getYtApiLegacyInstances());
         yt2009Section = new InstanceSection(context, "yt2009", config.getYt2009Instances());
-        s60TubeRow = new FixedApiRow(context, "S60Tube", config.isS60TubeEnabled());
+        pipedSection = new InstanceSection(context, "Piped", config.getPipedInstances());
 
-        apiInstancesContainer.addView(ytApiLegacySection);
         apiInstancesContainer.addView(invidiousSection);
         apiInstancesContainer.addView(yt2009Section);
-        apiInstancesContainer.addView(s60TubeRow);
+        apiInstancesContainer.addView(pipedSection);
+        apiInstancesContainer.addView(ytApiLegacySection);
 
         findViewById(R.id.cancel).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -160,9 +158,8 @@ public class SettingsActivity extends Activity implements InstancesUpdater.OnIns
             }
         });
     }
-    
+
     private void saveSettings() {
-        config.setS60TubeEnabled(s60TubeRow.isEnabled());
         config.setUpdateInstancesFromUrl(updateInstancesChk.isChecked());
         config.setInstancesUpdateUrl(instancesUrlEdit.getText().toString().trim());
         config.setUpdateFrequency(updateFreqSpinner.getSelectedItemPosition());
@@ -172,15 +169,17 @@ public class SettingsActivity extends Activity implements InstancesUpdater.OnIns
         config.setConvertVideos(convertVideosChk.isChecked());
         config.setConvertCodec(codecSpinner.getSelectedItemPosition());
         config.setAsyncSetVideoUri(asyncUriChk.isChecked());
-        
+        config.setFullscreenRotateLandscape(fullscreenRotateChk.isChecked());
+
         config.setInvidiousInstances(invidiousSection.getInstances());
         config.setYtApiLegacyInstances(ytApiLegacySection.getInstances());
         config.setYt2009Instances(yt2009Section.getInstances());
-        
+        config.setPipedInstances(pipedSection.getInstances());
+
         configManager.saveConfig(config);
         Manager.getInstance().reloadInstances();
     }
-    
+
     private void setSpinnerSelection(Spinner spinner, String value) {
         for (int i = 0; i < spinner.getCount(); i++) {
             if (spinner.getItemAtPosition(i).toString().equals(value)) {
@@ -192,12 +191,11 @@ public class SettingsActivity extends Activity implements InstancesUpdater.OnIns
 
     @Override
     public void onInstancesUpdated() {
-        // Get fresh config from ConfigManager since it was updated
         config = configManager.getConfig();
-        // Refresh the UI sections with the new instances from config
         invidiousSection.setInstances(config.getInvidiousInstances());
         ytApiLegacySection.setInstances(config.getYtApiLegacyInstances());
         yt2009Section.setInstances(config.getYt2009Instances());
+        pipedSection.setInstances(config.getPipedInstances());
         Toast.makeText(this, R.string.ins_upd, Toast.LENGTH_SHORT).show();
     }
 }

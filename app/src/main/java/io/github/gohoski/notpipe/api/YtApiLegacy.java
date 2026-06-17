@@ -1,13 +1,13 @@
 package io.github.gohoski.notpipe.api;
 
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
-import java.util.TimeZone;
 
 import cc.nnproject.json.JSON;
 import cc.nnproject.json.JSONArray;
@@ -23,10 +23,10 @@ import io.github.gohoski.notpipe.http.HttpRequest;
 
 /**
  * Created by Gleb on 11.01.2026.
- * Implementation for YtAPILegacy (http://yt.swlbst.ru)
+ * Implementation of YtAPILegacy (https://github.com/ZendoMusic/yt-api-legacy)
  */
 
-public class YtApiLegacy implements Metadata, Trending, VideoStream {
+public class YtApiLegacy implements Metadata, VideoStream, Conversion {
     private String baseUrl;
 
     public YtApiLegacy(String baseUrl) {
@@ -38,8 +38,11 @@ public class YtApiLegacy implements Metadata, Trending, VideoStream {
         return baseUrl.replace("https://", "").replace("http://", "");
     }
 
+    /**
+     * Retrieves popular videos through YouTube Data API v3
+     */
     @Override
-    public List<VideoInfo> getTrendingVideos() throws IOException {
+    public List<VideoInfo> getPopularVideos() throws IOException {
         HttpRequest req = new HttpRequest(baseUrl, "/get_top_videos.php");
         JSONArray arr = JSON.getArray(HttpClient.executeToString(req));
         List<VideoInfo> videos = new ArrayList<VideoInfo>();
@@ -65,10 +68,16 @@ public class YtApiLegacy implements Metadata, Trending, VideoStream {
             long views; try {
                 views = Long.parseLong(j.getString("views").replaceAll("[^0-9]", ""));
             } catch(Exception ignored) { views=-1; }
+            String channelId; try {
+                channelId = j.getString("channel_id");
+            } catch(JSONException ignored) { channelId=""; }
+            Date publishedAt; try {
+                publishedAt = Utils.parseRelativeDate(j.getString("published"));
+            } catch(JSONException ignored) { publishedAt=null; }
             videos.add(new VideoInfo(j.getString("video_id"), j.getString("title"),
                     Utils.parseUrl(baseUrl, j.getString("thumbnail")), j.getString("author"),
-                    Utils.parseUrl(baseUrl, j.getString("channel_thumbnail")), j.getString("channel_id"),
-                    duration, views, Utils.parseRelativeDate(j.getString("published"))));
+                    Utils.parseUrl(baseUrl, j.getString("channel_thumbnail")), channelId,
+                    duration, views, publishedAt));
         } return videos;
     }
 
@@ -90,15 +99,13 @@ public class YtApiLegacy implements Metadata, Trending, VideoStream {
             publishedAt = new SimpleDateFormat("MMM d, yyyy", Locale.US).parse(dateString);
         } catch(ParseException ignored) {
             try {
-                publishedAt = new SimpleDateFormat("dd.MM.yyyy, HH:mm:ss").parse(dateString);
+                publishedAt = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ").parse(dateString.replaceAll("([+-]\\d{2}):(\\d{2})$", "$1$2"));
             } catch(ParseException ignored2) {
                 try {
-                    if (dateString.length() >= 25 && dateString.charAt(22) == ':') // remove colon
-                        dateString = dateString.substring(0, 22) + dateString.substring(23);
-                    publishedAt = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ").parse(dateString);
+                    publishedAt = new SimpleDateFormat("yyyy-MM-dd").parse(dateString);
                 } catch (ParseException e) {
                     e.printStackTrace();
-                    publishedAt = Utils.parseRelativeDate(dateString.replace("Premiered ",""));
+                    publishedAt = Utils.parseRelativeDate(dateString);
                 }
             }
         }
@@ -106,38 +113,58 @@ public class YtApiLegacy implements Metadata, Trending, VideoStream {
         List<Comment> comments = new ArrayList<Comment>();
         JSONArray arr = json.getArray("comments");
 
-        SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
-        f.setTimeZone(TimeZone.getTimeZone("UTC"));
-
         for (int i = 0; i < arr.size(); i++) {
             JSONObject j = arr.getObject(i);
-            Date date; try {
-                date = f.parse(j.getString("published_at"));
-            } catch(ParseException ignored) {
-                date = Utils.parseRelativeDate(j.getString("published_at").replace(" (edited)",""));
-            }
-            comments.add(new Comment(j.getString("author"), Utils.parseUrl(baseUrl,j.getString("author_thumbnail")),
-                    j.getString("text"), date));
+            String author = j.getString("author");
+            comments.add(new Comment(author, Utils.parseUrl(baseUrl,j.getString("author_thumbnail")),
+                    j.getString("text"), Utils.parseRelativeDate(j.getString("published_at")), author));
         }
 
         int likes; try {
             likes = Integer.parseInt(json.getString("likes"));
         } catch(NumberFormatException ignored) { likes = -1; }
-
+        String duration = json.getString("duration");
+        int length; try {
+            length = json.getInt("length_seconds");
+        } catch(JSONException ignored) {
+            length = parseToSeconds(duration);
+        }
+        String channelId = json.getString("channel_custom_url");
+        try {
+            channelId = URLDecoder.decode(channelId, "UTF-8");
+        } catch(NullPointerException ignored) {}
         return new Video(id, json.getString("title"), Utils.parseUrl(baseUrl,json.getString("thumbnail")), json.getString("author"),
-                Utils.parseUrl(baseUrl,json.getString("channel_thumbnail")), json.getString("channel_custom_url"),
-                json.getString("duration"), Long.parseLong(json.getString("views")), publishedAt, json.getString("description"), likes,
-                Integer.parseInt(json.getString("subscriberCount")), baseUrl + "/direct_url?video_id=" + id, comments, null);
+                Utils.parseUrl(baseUrl,json.getString("channel_thumbnail")), channelId, duration, length,
+                Long.parseLong(json.getString("views")), publishedAt, json.getString("description"), likes,
+                Integer.parseInt(json.getString("subscriberCount")), baseUrl + "/direct_url?video_id=" + id, null, comments);
     }
 
     @Override
-    public String getVideoUrl(String id, String quality) throws IOException {
-        return baseUrl + "/direct_url?video_id=" + id + (quality == null || quality.length() == 0 || "360".equals(quality) ? "" : "&quality=" + quality);
+    public String getVideoUrl(String id, String quality, int ignored) throws IOException {
+        return baseUrl + "/direct_url?video_id=" + id + "&quality=" + quality;
     }
 
     /** Conversion to MPEG-4 Visual or H.263 */
-    public String getConvUrl(String id, int codec) throws IOException {
+    @Override
+    public String getConvUrl(String id, int codec) {
         return baseUrl + "/direct_url?video_id=" + id + "&codec=" + (codec == 1 ? "h263" : "mpeg4");
+    }
+
+    @Override public List<VideoInfo> getRelated(String id) throws IOException {
+        HttpRequest req = new HttpRequest.Builder(baseUrl, "/get_related_videos.php").addParam("video_id", id).build();
+        JSONArray arr = JSON.getArray(HttpClient.executeToString(req, 60000));
+        List<VideoInfo> videos = new ArrayList<VideoInfo>();
+        for (int i = 0; i < arr.size(); i++) {
+            JSONObject json = arr.getObject(i);
+            long views; try {
+                views = Long.parseLong(json.getString("views"));
+            }catch(NumberFormatException ignored) { views = -1; }
+            videos.add(new VideoInfo(json.getString("video_id"), json.getString("title"),
+                    Utils.parseUrl(baseUrl, json.getString("thumbnail")), json.getString("author"),
+                    Utils.parseUrl(baseUrl, json.getString("channel_thumbnail")), "", "",
+                    views, Utils.parseRelativeDate(json.getString("published_at"))));
+        }
+        return videos;
     }
 
     @Override public List<Comment> getComments(String id) throws IOException {
@@ -147,38 +174,14 @@ public class YtApiLegacy implements Metadata, Trending, VideoStream {
         List<Comment> comments = new ArrayList<Comment>();
         JSONArray arr = json.getArray("comments");
 
-        SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
-        f.setTimeZone(TimeZone.getTimeZone("UTC"));
-
         for (int i = 0; i < arr.size(); i++) {
             JSONObject j = arr.getObject(i);
-            Date date; try {
-                date = f.parse(j.getString("published_at"));
-            } catch(ParseException ignored) {
-                date = Utils.parseRelativeDate(j.getString("published_at").replace(" (edited)",""));
-            }
-            comments.add(new Comment(j.getString("author"), Utils.parseUrl(baseUrl,j.getString("author_thumbnail")),
-                    j.getString("text"), date));
+            String author = j.getString("author");
+            comments.add(new Comment(author, Utils.parseUrl(baseUrl,j.getString("author_thumbnail")),
+                    j.getString("text"), Utils.parseRelativeDate(j.getString("published_at")), author));
         }
 
         return comments;
-    }
-
-    @Override public List<VideoInfo> getRelated(String id) throws IOException {
-        HttpRequest req = new HttpRequest.Builder(baseUrl, "/get_related_videos.php").addParam("video_id", id).build();
-        JSONArray arr = JSON.getArray(HttpClient.executeToString(req, 60000));
-        List<VideoInfo> videos = new ArrayList<VideoInfo>();
-        for (int i = 0; i < arr.size(); i++) {
-            JSONObject json = arr.getObject(i);
-            String duration; try {
-                duration = json.getString("duration");
-            } catch(JSONException ignored) { duration=null; }
-            videos.add(new VideoInfo(json.getString("video_id"), json.getString("title"),
-                    Utils.parseUrl(baseUrl, json.getString("thumbnail")), json.getString("author"),
-                    Utils.parseUrl(baseUrl, json.getString("channel_thumbnail")), "", duration,
-                    Long.parseLong(json.getString("views")), Utils.parseRelativeDate(json.getString("published_at"))));
-        }
-        return videos;
     }
 
     @Override
@@ -202,15 +205,14 @@ public class YtApiLegacy implements Metadata, Trending, VideoStream {
                 duration = json.getString("duration");
             } catch(JSONException ignored) { duration=null; }
             videos.add(new VideoInfo(json.getString("video_id"), json.getString("title"),
-                    Utils.parseUrl(baseUrl, json.getString("thumbnail")), json.getString("author"),
-                    Utils.parseUrl(baseUrl, json.getString("channel_thumbnail")), "",
-                    duration, Integer.parseInt(json.getString("views")), Utils.parseRelativeDate(json.getString("published_at"))));
+                    Utils.parseUrl(baseUrl, json.getString("thumbnail")), json.getString("author"), "", "",
+                    duration, Long.parseLong(json.getString("views")), Utils.parseRelativeDate(json.getString("published_at"))));
         }
         JSONObject json = obj.getObject("channel_info");
-        return new Channel(json.getString("title"), Utils.parseUrl(baseUrl,json.getString("thumbnail")),
+        String thumbnail = json.getString("thumbnail");
+        return new Channel(thumbnail.substring(thumbnail.lastIndexOf('/') + 1), json.getString("title"), Utils.parseUrl(baseUrl,json.getString("thumbnail")),
                 Utils.parseUrl(baseUrl,json.getString("banner").replace("w2560", "w900")), json.getString("description"),
-                Integer.parseInt(json.getString("subscriber_count")),
-                Integer.parseInt(json.getString("video_count")), videos);
+                Integer.parseInt(json.getString("subscriber_count")), videos);
     }
 
     @Override
@@ -220,5 +222,74 @@ public class YtApiLegacy implements Metadata, Trending, VideoStream {
 //            return Utils.parseUrl(baseUrl, JSON.getObject(HttpClient.executeToString(req)).getObject("channel_info").getString("thumbnail"));
 //        }
         return baseUrl + "/channel_icon/" + id;
+    }
+
+    @Override
+    public List<VideoInfo> getChannelVideos(String id, int sort) throws IOException {
+        List<VideoInfo> videos = new ArrayList<VideoInfo>();
+        if (sort != 0) // We can get only latest channel videos
+            return videos;
+        HttpRequest req = new HttpRequest(baseUrl, "/playlist/UU" + id.substring(2));
+        JSONArray arr = JSON.getObject(HttpClient.executeToString(req)).getArray("videos");
+        for (int i = 0; i < arr.size(); i++) {
+            JSONObject j = arr.getObject(i);
+            Date publishedAt; try {
+                publishedAt = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'").parse(j.getString("published_at"));
+            } catch(Exception ignored) { publishedAt = null; }
+            long views; try {
+                views = Long.parseLong(j.getString("views").replaceAll("[^0-9]", ""));
+            }catch(Exception ignored) { views = -1; }
+            videos.add(new VideoInfo(j.getString("video_id"), j.getString("title"), Utils.parseUrl(baseUrl,j.getString("thumbnail")),
+                    null, null, null, "", views, publishedAt));
+        }
+        return videos;
+    }
+
+    /**
+     * Translates an ISO 8601 duration string (e.g., "PT16M21S") into seconds.
+     *
+     * @param duration The duration string to parse.
+     * @return The total length in seconds.
+     * @throws IllegalArgumentException if the format is invalid.
+     */
+    private static int parseToSeconds(String duration) {
+        if (duration == null || duration.length() == 0 || duration.charAt(0) != 'P') {
+            return -1;
+        }
+        int totalSeconds = 0;
+        int currentValue = 0;
+        boolean hasValue = false;
+        int startIndex = (duration.length() > 1 && duration.charAt(1) == 'T') ? 2 : 1;
+        for (int i = startIndex; i < duration.length(); i++) {
+            char c = duration.charAt(i);
+            if (Character.isDigit(c)) {
+                currentValue = currentValue * 10 + (c - '0');
+                hasValue = true;
+            } else {
+                if (!hasValue) {
+                    throw new IllegalArgumentException("Invalid duration: time unit '" + c + "' without a preceding value.");
+                }
+                switch (c) {
+                    case 'D':
+                        totalSeconds += currentValue * 86400;
+                        break;
+                    case 'H':
+                        totalSeconds += currentValue * 3600;
+                        break;
+                    case 'M':
+                        totalSeconds += currentValue * 60;
+                        break;
+                    case 'S':
+                        totalSeconds += currentValue;
+                        break;
+                    default:
+                        throw new IllegalArgumentException("Unknown time unit: '" + c + "'");
+                }
+                currentValue = 0;
+                hasValue = false;
+            }
+        }
+
+        return totalSeconds;
     }
 }

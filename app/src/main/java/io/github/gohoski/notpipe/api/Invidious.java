@@ -1,5 +1,7 @@
 package io.github.gohoski.notpipe.api;
 
+import android.util.Log;
+
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -38,26 +40,23 @@ public class Invidious implements Metadata, VideoStream {
     }
 
     /**
-     * It seems that Invidious has trouble loading trending videos.
-     * If that issue will get fixed, this method will be uncommented.
-
+     * Retrieves YouTube Hyped videos via playlists
+     */
     @Override
-    public List<VideoInfo> getTrendingVideos() throws IOException {
-        HttpRequest req = new HttpRequest(baseUrl, "/api/v1/trending");
-        JSONArray arr = JSON.getArray(HttpClient.executeToString(req));
-        System.out.println(arr);
+    public List<VideoInfo> getPopularVideos() throws IOException {
+        HttpRequest req = new HttpRequest(baseUrl, "/api/v1/playlists/" + Utils.getHypePlaylist());
+        JSONArray arr = JSON.getObject(HttpClient.executeToString(req)).getArray("videos");
         List<VideoInfo> videos = new ArrayList<VideoInfo>();
         for (int i = 0; i < arr.size(); i++) {
-            JSONObject json = arr.getObject(i);
-            videos.add(new VideoInfo(json.getString("videoId"), json.getString("title"),
-                    Utils.parseUrl(baseUrl,json.getArray("videoThumbnails").getObject(4).getString("url")),
-                    json.getString("author"),
-                    json.getArray("authorThumbnails").getObject(2).getString("url")
-                            .replace("https://yt3.ggpht.com", "http://yt4.ggpht.com"),
-                    Utils.formatDuration(json.getInt("lengthSeconds")), json.getInt("viewCount")));
+            JSONObject j = arr.getObject(i);
+            if ("video".equals(j.getString("type"))) // Sometimes there is parse-error
+                videos.add(new VideoInfo(j.getString("videoId"), j.getString("title"),
+                        Utils.parseUrl(baseUrl, j.getArray("videoThumbnails").getObject(VIDEO_THUMB).getString("url")),
+                        j.getString("author"), "", j.getString("authorId"), Utils.formatDuration(j.getInt("lengthSeconds")),
+                        -1, null));
         }
         return videos;
-    }*/
+    }
 
     @Override public List<VideoInfo> search(String q) throws IOException {
         HttpRequest req = new HttpRequest.Builder(baseUrl, "/api/v1/search").addParam("q",q).addParam("type", "video").build();
@@ -108,30 +107,35 @@ public class Invidious implements Metadata, VideoStream {
         return new Video(id, json.getString("title"),
                 Utils.parseUrl(baseUrl, json.getArray("videoThumbnails").getObject(VIDEO_THUMB).getString("url")), json.getString("author"),
                 Utils.parseUrl(baseUrl + "/ggpht", json.getArray("authorThumbnails").getObject(AUTHOR_THUMB).getString("url")),
-                json.getString("authorId"), Utils.formatDuration(json.getInt("lengthSeconds")), json.getLong("viewCount"),
+                json.getString("authorId"), json.getInt("lengthSeconds"), json.getLong("viewCount"),
                 new Date(json.getLong("published") * 1000L), json.getString("description"), json.getInt("likeCount"),
                 (int)Utils.parseTextCount(json.getString("subCountText")),
-                Utils.parseUrl(baseUrl, json.getArray("formatStreams").getObject(0).getString("url")), null, related);
+                Utils.parseUrl(baseUrl, json.getArray("formatStreams").getObject(0).getString("url")), related, null);
     }
 
-    @Override public String getVideoUrl(String id, String ignored) throws IOException {
+    @Override public String getVideoUrl(String id, String ignored, int ignored2) throws IOException {
         //Invidious can provide a combined stream only in 360p, so we ignore the quality variable
         //Invidious will be disabled for non-360p via the Manager
         HttpRequest req = new HttpRequest(baseUrl, "/api/v1/videos/"+id+"?local=true");
-        JSONObject json = JSON.getObject(HttpClient.executeToString(req, HttpClient.VIDEO_TIMEOUT));
+        JSONObject json = JSON.getObject(HttpClient.executeToString(req));
         return Utils.parseUrl(baseUrl, json.getArray("formatStreams").getObject(0).getString("url"));
     }
 
     @Override public List<Comment> getComments(String id) throws IOException {
-        HttpRequest req = new HttpRequest(baseUrl, "/api/v1/comments/"+id);
-        JSONArray arr = JSON.getObject(HttpClient.executeToString(req)).getArray("comments");
-        List<Comment> comments = new ArrayList<Comment>();
-        for (int i = 0; i < arr.size(); i++) {
-            JSONObject j = arr.getObject(i);
-            comments.add(new Comment(j.getString("author"), Utils.parseUrl(baseUrl + "/ggpht", j.getArray("authorThumbnails").getObject(0).getString("url")),
-                    j.getString("content"), new Date(j.getLong("published") * 1000L)));
+        try {
+            HttpRequest req = new HttpRequest(baseUrl, "/api/v1/comments/"+id);
+            JSONArray arr = JSON.getObject(HttpClient.executeToString(req)).getArray("comments");
+            List<Comment> comments = new ArrayList<Comment>();
+            for (int i = 0; i < arr.size(); i++) {
+                JSONObject j = arr.getObject(i);
+                comments.add(new Comment(j.getString("author"), Utils.parseUrl(baseUrl + "/ggpht", j.getArray("authorThumbnails").getObject(0).getString("url")),
+                        j.getString("content"), new Date(j.getLong("published") * 1000L), j.getString("authorId")));
+            }
+            return comments;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return new ArrayList<Comment>();
         }
-        return comments;
     }
 
     @Override public List<VideoInfo> getRelated(String id) throws IOException {
@@ -173,30 +177,64 @@ public class Invidious implements Metadata, VideoStream {
         }
         HttpRequest req = new HttpRequest(baseUrl, "/api/v1/channels/"+id);
         JSONObject json = JSON.getObject(HttpClient.executeToString(req));
-        List<VideoInfo> videos = new ArrayList<VideoInfo>();
-        JSONArray arr = json.getArray("latestVideos");
-        String thumbnail = Utils.parseUrl(baseUrl + "/ggpht", json.getArray("authorThumbnails").getObject(AUTHOR_THUMB).getString("url"));
-        for (int i = 0; i < arr.size(); i++) {
-            try {
-                JSONObject j = arr.getObject(i);
-                videos.add(new VideoInfo(j.getString("videoId"), j.getString("title"),
-                        Utils.parseUrl(baseUrl, j.getArray("videoThumbnails").getObject(VIDEO_THUMB).getString("url")),
-                        j.getString("author"), thumbnail, id,
-                        Utils.formatDuration(j.getInt("lengthSeconds")), j.getLong("viewCount"), new Date(j.getLong("published") * 1000L)
-                ));
-            } catch(Exception e) { e.printStackTrace(); }
-        }
+        List<VideoInfo> videos = parseChannelVideos(json.getArray("latestVideos"));
         JSONArray banners = json.getArray("authorBanners");
         String banner = "";
         if (!banners.isEmpty())
             banner = Utils.parseUrl(baseUrl + "/ggpht", banners.getObject(0).getString("url").replace("w2560", "w900"));
-        return new Channel(json.getString("author"), thumbnail, banner,
-                json.getString("description"), json.getInt("subCount"), videos.size(), videos);
+        return new Channel(id, json.getString("author"),
+                Utils.parseUrl(baseUrl + "/ggpht", json.getArray("authorThumbnails").getObject(AUTHOR_THUMB).getString("url")), banner,
+                json.getString("description"), json.getInt("subCount"), videos);
     }
 
     @Override
     public String getChannelIcon(String id) throws IOException {
         HttpRequest req = new HttpRequest(baseUrl, "/api/v1/channels/"+id);
         return Utils.parseUrl(baseUrl + "/ggpht", JSON.getObject(HttpClient.executeToString(req)).getArray("authorThumbnails").getObject(AUTHOR_THUMB).getString("url"));
+    }
+
+    @Override
+    public List<VideoInfo> getChannelVideos(String id, int sort) throws IOException {
+        HttpRequest req = new HttpRequest.Builder(baseUrl, "/api/v1/channels/"+id + "/videos")
+                .addParam("sort_by", sort == 1 ? "popular" : "newest").build();
+        JSONObject json = JSON.getObject(HttpClient.executeToString(req));
+        List<VideoInfo> videos = parseChannelVideos(json.getArray("videos"));
+        if (videos.isEmpty()) {
+            if (sort == 1) // At this stage, we can't get popular channel videos
+                return videos;
+            // If the instance can't parse videos from the channel page, we'll use channel playlist instead
+            req = new HttpRequest(baseUrl, "/api/v1/playlists/UU" + id.substring(2));
+            JSONArray arr = JSON.getObject(HttpClient.executeToString(req)).getArray("videos");
+            for (int i = 0; i < arr.size(); i++) {
+                JSONObject j = arr.getObject(i);
+                videos.add(new VideoInfo(j.getString("videoId"), j.getString("title"),
+                        Utils.parseUrl(baseUrl, j.getArray("videoThumbnails").getObject(VIDEO_THUMB).getString("url")),
+                        null, null, null, Utils.formatDuration(j.getInt("lengthSeconds")), -1, null));
+            }
+        }
+        return videos;
+    }
+
+    private List<VideoInfo> parseChannelVideos(JSONArray arr) {
+        List<VideoInfo> videos = new ArrayList<VideoInfo>();
+        for (int i = 0; i < arr.size(); i++) {
+            try {
+                JSONObject j = arr.getObject(i);
+                String type = j.getString("type");
+                if (type.equals("video"))
+                    videos.add(new VideoInfo(j.getString("videoId"), j.getString("title"),
+                            Utils.parseUrl(baseUrl, j.getArray("videoThumbnails").getObject(VIDEO_THUMB).getString("url")),
+                            null, null, null,
+                            Utils.formatDuration(j.getInt("lengthSeconds")), j.getLong("viewCount"), new Date(j.getLong("published") * 1000L)
+                    ));
+                else if (type.equals("playlist")) { // Sometimes videos can be incorrectly returned as playlists, but still with valid info
+                    String videoId = j.getString("playlistId");
+                    videos.add(new VideoInfo(videoId, j.getString("title"),
+                            baseUrl + "/vi/" + videoId + "/mqdefault.jpg", "", null, null, "", -1, null
+                    ));
+                } else Log.w("Invidious", "Unknown channel video type " + type);
+            } catch(Exception e) { e.printStackTrace(); }
+        }
+        return videos;
     }
 }

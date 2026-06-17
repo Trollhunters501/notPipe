@@ -16,8 +16,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.AutoCompleteTextView;
+import android.widget.GridView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -32,7 +34,6 @@ import java.util.List;
 
 import io.github.gohoski.notpipe.api.Manager;
 import io.github.gohoski.notpipe.api.Metadata;
-import io.github.gohoski.notpipe.api.Trending;
 import io.github.gohoski.notpipe.config.Config;
 import io.github.gohoski.notpipe.config.ConfigManager;
 import io.github.gohoski.notpipe.data.VideoInfo;
@@ -48,9 +49,8 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
     private VideoAdapter adapter;
     private List<VideoInfo> videos;
     private AutoCompleteTextView searchQuery;
-    private ListView listView;
+    private AbsListView listView;
     private Context context;
-    private Trending trending = null;
     private Metadata metadata;
     private AutoCompleteAdapter autoCompleteAdapter;
     private Config config = ConfigManager.getInstance().getConfig();
@@ -74,21 +74,42 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
         return state;
     }
 
+    // Helper method to dynamically set adapter without relying on API 11 setAdapter() in AbsListView
+    private void setAdapterForView(AbsListView view, VideoAdapter adapter) {
+        if (view instanceof ListView) {
+            ((ListView) view).setAdapter(adapter);
+        } else if (view instanceof GridView) {
+            ((GridView) view).setAdapter(adapter);
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        listView = (ListView) findViewById(R.id.videos);
+        listView = (AbsListView) findViewById(R.id.videos); // Changed cast to AbsListView
         searchQuery = (AutoCompleteTextView) findViewById(R.id.search_query);
         final ImageButton searchBtn = (ImageButton) findViewById(R.id.search_btn);
         final ProgressBar loading = (ProgressBar) findViewById(R.id.loading);
-        final LinearLayout noTrending = (LinearLayout) findViewById(R.id.no_trending);
+        final LinearLayout noPopular = (LinearLayout) findViewById(R.id.no_popular);
         context = this;
 
-        try {
-            trending = Manager.getInstance().getTrending();
-        } catch(IllegalStateException ignored) {}
+        // Hook up the scroll listener right after binding the AbsListView
+        listView.setOnScrollListener(new AbsListView.OnScrollListener() {
+            @Override
+            public void onScrollStateChanged(AbsListView view, int scrollState) {
+                if (scrollState == SCROLL_STATE_IDLE) {
+                    if (adapter != null) {
+                        adapter.notifyDataSetChanged();
+                    }
+                }
+            }
+
+            @Override
+            public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {}
+        });
+
         try {
             metadata = Manager.getInstance().getMetadata();
         } catch(IllegalStateException ignored) {}
@@ -164,6 +185,7 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
                 return false;
             }
         });
+
         searchBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -172,8 +194,10 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
                     searchQuery.dismissDropDown();
                     autoCompleteAdapter.setSearchActive(true);
                     isSearchMode = true;
-                    noTrending.setVisibility(View.GONE);
+                    noPopular.setVisibility(View.GONE);
                     loading.setVisibility(View.VISIBLE);
+                    View emptyView = findViewById(R.id.empty_videos);
+                    if (emptyView != null) emptyView.setVisibility(View.GONE);
                     hideKeyboard();
                     new SearchTask().execute(query);
                 }
@@ -207,14 +231,22 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
                     new SearchTask().execute(searchQuery.getText().toString().trim());
                 } else {
                     isSearchMode = false;
-                    new TrendingTask().execute();
+                    new PopularTask().execute();
                 }
             }
         } else {
             loading.setVisibility(View.GONE);
-            noTrending.setVisibility(View.GONE);
-            adapter = new VideoAdapter(this, R.layout.video_item, videos);
-            listView.setAdapter(adapter);
+            noPopular.setVisibility(View.GONE);
+
+            int layout;
+            if (listView instanceof GridView || isSearchMode) {
+                layout = R.layout.item_video;
+            } else {
+                layout = R.layout.item_video_compact;
+            }
+
+            adapter = new VideoAdapter(this, layout, videos);
+            setAdapterForView(listView, adapter);
         }
     }
 
@@ -223,14 +255,35 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
         if (isDestroyedFlag) return;
         if (videos == null) {
             if (isSearchMode && searchQuery.getText().toString().trim().length() > 0) {
-                findViewById(R.id.no_trending).setVisibility(View.GONE);
+                findViewById(R.id.no_popular).setVisibility(View.GONE);
                 findViewById(R.id.loading).setVisibility(View.VISIBLE);
                 new SearchTask().execute(searchQuery.getText().toString().trim());
             } else {
                 isSearchMode = false;
-                new TrendingTask().execute();
+                new PopularTask().execute();
             }
         }
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK && event.getRepeatCount() == 0) {
+            if (isSearchMode) {
+                isSearchMode = false;
+                searchQuery.setText("");
+                findViewById(R.id.no_popular).setVisibility(View.GONE);
+                findViewById(R.id.loading).setVisibility(View.VISIBLE);
+                View emptyView = findViewById(R.id.empty_videos);
+                if (emptyView != null) emptyView.setVisibility(View.GONE);
+                Toast.makeText(this, R.string.confirm_exit, Toast.LENGTH_SHORT).show();
+                new PopularTask().execute();
+                return true;
+            } else {
+                finish();
+                return true;
+            }
+        }
+        return super.onKeyDown(keyCode, event);
     }
 
     private void hideKeyboard() {
@@ -259,8 +312,6 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
 
     @Override
     protected void onRestoreInstanceState(Bundle savedInstanceState) {
-        // Skip calling super when the adapter isn't attached yet to prevent
-        // ListView crashes, but safely restore list scroll position if it is.
         if (adapter != null) {
             try {
                 super.onRestoreInstanceState(savedInstanceState);
@@ -278,7 +329,6 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
     protected void onDestroy() {
         super.onDestroy();
         isDestroyedFlag = true;
-        // Only clear the cache if the activity is dying completely, NOT on rotation
         if (isFinishing()) {
             ImageLoader.clearCache();
         }
@@ -286,7 +336,7 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.main_menu, menu);
+        getMenuInflater().inflate(R.menu.menu_main, menu);
         return true;
     }
 
@@ -370,17 +420,26 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
 
         @Override
         protected void onPostExecute(SearchResult result) {
-            if (isDestroyedFlag) return; // Discard safely if activity was killed during rotation
-
+            if (isDestroyedFlag) return;
             View loadingView = findViewById(R.id.loading);
             if (loadingView != null) loadingView.setVisibility(View.GONE);
-
+            TextView emptyView = (TextView) findViewById(R.id.empty_videos);
             if (result.error != null) {
                 Toast.makeText(MainActivity.this, "Search failed: " + result.error.getMessage(), Toast.LENGTH_LONG).show();
+                if (emptyView != null) emptyView.setVisibility(View.GONE);
             } else if (result.videos != null) {
                 videos = result.videos;
-                adapter = new VideoAdapter(MainActivity.this, R.layout.video_item, videos);
-                if (listView != null) listView.setAdapter(adapter);
+                adapter = new VideoAdapter(MainActivity.this, R.layout.item_video, videos);
+                if (listView != null) {
+                    setAdapterForView(listView, adapter);
+                }
+                if (emptyView != null) {
+                    if (videos == null || videos.isEmpty()) {
+                        emptyView.setVisibility(View.VISIBLE);
+                    } else {
+                        emptyView.setVisibility(View.GONE);
+                    }
+                }
             }
         }
     }
@@ -390,45 +449,61 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
         Exception error;
     }
 
-    private class TrendingTask extends AsyncTask<Void, Void, TrendingResult> {
+    private class PopularTask extends AsyncTask<Void, Void, PopularResult> {
         @Override
-        protected TrendingResult doInBackground(Void... params) {
-            TrendingResult result = new TrendingResult();
-            if (trending != null) {
+        protected PopularResult doInBackground(Void... params) {
+            PopularResult result = new PopularResult();
+            try {
+                Metadata popularApi = null;
                 try {
-                    result.videos = trending.getTrendingVideos();
-                } catch (Exception e) {
-                    result.error = e;
+                    popularApi = Manager.getInstance().getPopularMetadata();
+                } catch (Exception ignored) {}
+                if (popularApi != null) {
+                    try {
+                        result.videos = popularApi.getPopularVideos();
+                        return result;
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
                 }
-            } else {
-                result.error = new Exception("Trending unavailable");
+                if (metadata != null) {
+                    result.videos = metadata.getPopularVideos();
+                } else {
+                    result.error = new Exception("Popular unavailable");
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                result.error = e;
             }
             return result;
         }
 
         @Override
-        protected void onPostExecute(TrendingResult result) {
-            if (isDestroyedFlag) return; // Discard safely if activity was killed during rotation
-
+        protected void onPostExecute(PopularResult result) {
+            if (isDestroyedFlag) return;
             View loadingView = findViewById(R.id.loading);
             if (loadingView != null) loadingView.setVisibility(View.GONE);
-
-            View noTrendingView = findViewById(R.id.no_trending);
+            View noPopularView = findViewById(R.id.no_popular);
+            TextView emptyView = (TextView) findViewById(R.id.empty_videos);
+            if (emptyView != null) emptyView.setVisibility(View.GONE);
             if (result.error != null) {
-                if (noTrendingView != null) noTrendingView.setVisibility(View.VISIBLE);
+                if (noPopularView != null) noPopularView.setVisibility(View.VISIBLE);
                 result.error.printStackTrace();
-            } else if (trending == null || result.videos == null || result.videos.size() == 0) {
-                if (noTrendingView != null) noTrendingView.setVisibility(View.VISIBLE);
+            } else if (metadata == null || result.videos == null || result.videos.size() == 0) {
+                if (noPopularView != null) noPopularView.setVisibility(View.VISIBLE);
             } else {
-                if (noTrendingView != null) noTrendingView.setVisibility(View.GONE);
+                if (noPopularView != null) noPopularView.setVisibility(View.GONE);
                 videos = result.videos;
-                adapter = new VideoAdapter(context, R.layout.video_item, videos);
-                if (listView != null) listView.setAdapter(adapter);
+                int layout = result.videos.get(0).channelThumbnail.length() > 0 ? R.layout.item_video : R.layout.item_video_compact;
+                adapter = new VideoAdapter(context, layout, videos);
+                if (listView != null) {
+                    setAdapterForView(listView, adapter);
+                }
             }
         }
     }
 
-    private class TrendingResult {
+    private class PopularResult {
         List<VideoInfo> videos;
         Exception error;
     }

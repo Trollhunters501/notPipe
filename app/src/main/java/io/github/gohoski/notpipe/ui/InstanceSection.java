@@ -102,13 +102,28 @@ public class InstanceSection extends LinearLayout {
             return;
         }
         try {
-            new java.net.URL(url);
+            String[] parts = url.split(",");
+            StringBuilder normalized = new StringBuilder();
+            for (int i = 0; i < parts.length; i++) {
+                String part = parts[i].trim();
+                if (part.length() == 0) {
+                    throw new java.net.MalformedURLException("empty part");
+                }
+                if (!part.startsWith("http://") && !part.startsWith("https://")) {
+                    part = "http://" + part;
+                }
+                if (part.endsWith("/")) {
+                    part = part.substring(0, part.length() - 1);
+                }
+                new java.net.URL(part);
+                if (i > 0) normalized.append(",");
+                normalized.append(part);
+            }
+            url = normalized.toString();
         } catch (java.net.MalformedURLException e) {
             Toast.makeText(context, R.string.incorrect_url, Toast.LENGTH_SHORT).show();
             return;
         }
-        if (!url.startsWith("http://") && !url.startsWith("https://")) url = "http://" + url;
-        if (url.endsWith("/")) url = url.substring(0, url.length() - 1);
 
         // Refresh the list to check against what's currently in the layout
         instances = getInstances();

@@ -15,13 +15,27 @@ import io.github.gohoski.notpipe.data.VideoInfo;
 public interface Metadata {
     String getName(); String getHost();
 
+    /**
+     * Popular videos can be implemented through YouTube hyped playlists via Utils.getHypePlaylist()
+     */
+    List<VideoInfo> getPopularVideos() throws IOException;
     List<VideoInfo> search(String q) throws IOException;
     List<String> searchSuggestions(String q) throws IOException;
+
     Video getVideo(String id) throws IOException;
-    List<Comment> getComments(String id) throws IOException;
     List<VideoInfo> getRelated(String id) throws IOException;
+    List<Comment> getComments(String id) throws IOException;
     String getThumbnail(String id);
 
-    Channel getChannel(String id) throws IOException; /** This method resolves both @usernames and UC channel IDs! */
+    /** This method resolves both @usernames and UC channel IDs! */
+    Channel getChannel(String id) throws IOException;
     String getChannelIcon(String id) throws IOException;
+    /**
+     * If the channel videos endpoint doesn't exist or is unreliable, you can fallback to using channel playlist
+     * (`"UU" + id.substring(2)`)
+     * If Metadata.getChannelVideos fails to retrieve videos, please use ChannelApi
+     * @param id Channel ID
+     * @param sort 0 = Latest, 1 = Popular
+     */
+    List<VideoInfo> getChannelVideos(String id, int sort) throws IOException;
 }

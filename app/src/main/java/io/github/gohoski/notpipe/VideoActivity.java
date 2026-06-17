@@ -15,7 +15,10 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.util.Log;
 import android.util.TypedValue;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
@@ -35,24 +38,18 @@ import android.widget.Toast;
 import android.widget.VideoView;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.Serializable;
 import java.text.DateFormat;
 import java.text.NumberFormat;
 import java.util.ArrayList;
-import java.util.Hashtable;
 import java.util.List;
 import java.util.Locale;
 import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-import io.github.gohoski.notpipe.api.DvaUha;
+import io.github.gohoski.notpipe.api.Conversion;
 import io.github.gohoski.notpipe.api.Manager;
 import io.github.gohoski.notpipe.api.Metadata;
 import io.github.gohoski.notpipe.api.VideoStream;
-import io.github.gohoski.notpipe.api.YtApiLegacy;
 import io.github.gohoski.notpipe.config.Config;
 import io.github.gohoski.notpipe.config.ConfigManager;
 import io.github.gohoski.notpipe.data.Comment;
@@ -63,6 +60,7 @@ import io.github.gohoski.notpipe.ui.AdapterLinearLayout;
 import io.github.gohoski.notpipe.ui.AspectRatioVideoView;
 import io.github.gohoski.notpipe.ui.CommentAdapter;
 import io.github.gohoski.notpipe.ui.VideoAdapter;
+import io.github.gohoski.notpipe.util.ChannelIconResolver;
 import io.github.gohoski.notpipe.util.ImageLoader;
 
 public class VideoActivity extends Activity {
@@ -91,19 +89,18 @@ public class VideoActivity extends Activity {
     boolean commentsLoaded = false;
     protected boolean isOpencore = NotPipe.SDK < 8; // OpenCORE—multimedia framework used on Android <2.2—has some bugs that need to be catched, hence this boolean
 
-    private Hashtable<String, String> resolvedChannelIcons = new Hashtable<String, String>();
-    private Hashtable<String, Boolean> fetchingChannelIcons = new Hashtable<String, Boolean>();
-    private ExecutorService channelIconExecutor = Executors.newFixedThreadPool(4);
-
     private LoadVideoTask loadVideoTask;
     private ResolveStreamTask resolveStreamTask;
     private DownloadVideoTask downloadVideoTask;
-    private ConvertVideoTask convertVideoTask;
 
     private static final int MAX_STREAM_RETRIES = 3;
     private int streamRetryCount = 0;
     private LoadCommentsTask loadCommentsTask;
     private LoadRelatedTask loadRelatedTask;
+
+    // Retry Handler and Runnable to manage automated recovery on I/O errors (1, -1004)
+    private Handler retryHandler = new Handler();
+    private Runnable retryRunnable = null;
 
     private int videoPosition = 0;
     private boolean videoPlaying = false;
@@ -111,16 +108,19 @@ public class VideoActivity extends Activity {
     private String videoUrl = null;
     private boolean isUsingMetadataUrl = false;
     private boolean isTabletFullscreen = false;
+    private boolean isFullscreenMode = false; // Unified field tracking active full screen state
     private boolean isVideoViewNeedsReload = true; // Tracks if VideoView lost its surface bounds
+    private String resolvedQuality = null;
+    private boolean isActivityStopped = false;
 
-    private static final int VIDEO_BUFFER_TIMEOUT = 60000;
+    private int videoBufferTimeout = 60000;
     private static final String DIR_VIDEOS = "notPipe/videos";
 
     private Handler systemUiHandler = new Handler();
     private Runnable hideSystemUiRunnable = new Runnable() {
         @Override
         public void run() {
-            if (isTabletFullscreen) {
+            if (isTabletFullscreen || isFullscreenMode) {
                 hideSystemUI();
             }
         }
@@ -129,10 +129,6 @@ public class VideoActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        // Enforce landscape orientation on tablets early to prevent networking/UI re-creation later
-        if (isTablet()) setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-
         setContentView(R.layout.activity_video);
 
         api = Manager.getInstance().getMetadata();
@@ -147,20 +143,33 @@ public class VideoActivity extends Activity {
             videoId = uri.getHost().contains("youtube.com") ? uri.getQueryParameter("v") : uri.getLastPathSegment();
         }
 
-        relatedAdapter = new VideoAdapter(this, R.layout.video_item, relatedVideos);
+        relatedAdapter = new VideoAdapter(this, R.layout.item_video, relatedVideos);
         relatedAdapter.setChannelIconListener(new VideoAdapter.ChannelIconListener() {
             @Override
             public String getResolvedIcon(String channelId) {
-                return resolvedChannelIcons.get(channelId);
+                return ChannelIconResolver.getResolved(channelId);
             }
 
             @Override
             public void onRequestFallbackIcon(String channelId) {
-                requestChannelIconFallback(channelId);
+                ChannelIconResolver.requestFallback(channelId, new ChannelIconResolver.OnIconResolvedListener() {
+                    @Override
+                    public void onIconResolved(String channelId, String url) {
+                        if (url != null && url.length() > 0 && relatedLoaded && relatedList instanceof ViewGroup) {
+                            ViewGroup vg = (ViewGroup) relatedList;
+                            for (int i = 0; i < vg.getChildCount(); i++) {
+                                View child = vg.getChildAt(i);
+                                if (child != null) {
+                                    relatedAdapter.updateChannelIconForView(child, channelId);
+                                }
+                            }
+                        }
+                    }
+                });
             }
         });
 
-        commentsAdapter = new CommentAdapter(this, R.layout.comment_item, comments);
+        commentsAdapter = new CommentAdapter(this, R.layout.item_comment, comments);
 
         setupViewReferences();
         setupAdapters();
@@ -171,60 +180,30 @@ public class VideoActivity extends Activity {
             tabHost.setVisibility(View.GONE);
         }
 
+        // Apply orientation configuration
+        if (isTablet()) {
+            applyTabletLayout(getResources().getConfiguration().orientation);
+        } else {
+            View fsButton = findViewById(R.id.full_screen);
+            if (fsButton != null) fsButton.setVisibility(View.GONE);
+        }
+
         videoView.setVisibility(View.GONE);
         applyOpenCoreLayoutFix();
         setupClickListeners();
         setupScrollHandler();
 
-        if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE) {
+        if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE && !isTablet()) {
             enterFullscreenMode();
         }
 
-        loadVideoTask = new LoadVideoTask();
-        loadVideoTask.execute(videoId);
-    }
-
-    private void requestChannelIconFallback(final String channelId) {
-        if (channelId == null || channelId.length() == 0 || fetchingChannelIcons.containsKey(channelId) || resolvedChannelIcons.containsKey(channelId)) {
-            return;
+        if (VideoCache.hasValidMetadata(videoId)) {
+            api = VideoCache.getMetadataInstance();
+            onVideoDataLoaded(VideoCache.getVideo());
+        } else {
+            loadVideoTask = new LoadVideoTask();
+            loadVideoTask.execute(videoId);
         }
-        fetchingChannelIcons.put(channelId, true);
-        channelIconExecutor.execute(new Runnable() {
-            @Override
-            public void run() {
-                String fetchedUrl = null;
-                try {
-                    Metadata fallbackApi = Manager.getInstance().getMetadata();
-                    if (fallbackApi != null) {
-                        fetchedUrl = fallbackApi.getChannelIcon(channelId);
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-
-                final String resultUrl = fetchedUrl;
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        fetchingChannelIcons.remove(channelId);
-                        if (resultUrl != null && resultUrl.length() > 0) {
-                            resolvedChannelIcons.put(channelId, resultUrl);
-                            if (relatedLoaded && relatedList instanceof ViewGroup) {
-                                ViewGroup vg = (ViewGroup) relatedList;
-                                for (int i = 0; i < vg.getChildCount(); i++) {
-                                    View child = vg.getChildAt(i);
-                                    if (child != null) {
-                                        relatedAdapter.updateChannelIconForView(child, channelId);
-                                    }
-                                }
-                            }
-                        } else {
-                            resolvedChannelIcons.put(channelId, "FAILED");
-                        }
-                    }
-                });
-            }
-        });
     }
 
     private void handleVideoClick(int position) {
@@ -298,24 +277,21 @@ public class VideoActivity extends Activity {
             AdapterLinearLayout activeList = (AdapterLinearLayout) activeView;
             if (activeList.getChildCount() == 0) return;
 
-            ScrollView activeScrollView = scrollView;
+            // Find the outermost ScrollView ancestor of the active list.
+            // In portrait, this will traverse past the inner tabs_scroll_view and select scroll_view.
+            // In landscape, scroll_view is in a sibling branch, so it selects tabs_scroll_view.
+            ScrollView activeScrollView = null;
             ViewParent parent = activeList.getParent();
             while (parent != null) {
                 if (parent instanceof ScrollView) {
                     activeScrollView = (ScrollView) parent;
-                    break;
                 }
                 parent = parent.getParent();
             }
 
             if (activeScrollView == null || activeScrollView.getHeight() == 0) return;
 
-            int[] listLoc = new int[2];
-            int[] scrollLoc = new int[2];
-            activeList.getLocationInWindow(listLoc);
-            activeScrollView.getLocationInWindow(scrollLoc);
-
-            int visibleTop = scrollLoc[1];
+            int visibleTop = activeScrollView.getScrollY();
             int visibleBottom = visibleTop + activeScrollView.getHeight();
 
             for (int i = 0; i < activeList.getChildCount(); i++) {
@@ -323,8 +299,20 @@ public class VideoActivity extends Activity {
                 // Prevent zero-height unlaid-out children from prematurely evaluating as visible
                 if (child == null || child.getHeight() == 0) continue;
 
-                int childTop = listLoc[1] + child.getTop();
-                int childBottom = listLoc[1] + child.getBottom();
+                // Calculate the child's top position relative to the selected activeScrollView
+                int childTop = 0;
+                View curr = child;
+                while (curr != null && curr != activeScrollView) {
+                    childTop += curr.getTop();
+                    ViewParent currParent = curr.getParent();
+                    if (currParent instanceof View) {
+                        curr = (View) currParent;
+                    } else {
+                        curr = null;
+                    }
+                }
+
+                int childBottom = childTop + child.getHeight();
 
                 if (childBottom > visibleTop && childTop < visibleBottom) {
                     if ("related".equals(currentTab)) {
@@ -337,8 +325,93 @@ public class VideoActivity extends Activity {
         }
     }
 
+    private static final int POSITION_TRACK_INTERVAL = 5000;
+    private Handler positionTrackHandler = new Handler();
+    private Runnable positionTrackRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (videoView != null && videoPrepared) {
+                try {
+                    if (videoView.isPlaying()) {
+                        int pos = videoView.getCurrentPosition();
+                        if (pos > 0) {
+                            videoPosition = pos;
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+            positionTrackHandler.postDelayed(this, POSITION_TRACK_INTERVAL);
+        }
+    };
+
+    private void startPositionTracking() {
+        positionTrackHandler.removeCallbacks(positionTrackRunnable);
+        positionTrackHandler.postDelayed(positionTrackRunnable, POSITION_TRACK_INTERVAL);
+    }
+
+    private void stopPositionTracking() {
+        positionTrackHandler.removeCallbacks(positionTrackRunnable);
+    }
+
+    /**
+     * Dynamically determines the video quality to request and sets the corresponding timeout.
+     */
+    private int getTimeoutForQuality(String quality) {
+        if (video == null || "360".equals(quality)) {
+            return 60000;
+        } else {
+            if (video.length < 1800) { // Shorter than 30 minutes
+                return 180000;
+            } else { // 30 minutes to 60 minutes
+                return 360000;
+            }
+        }
+    }
+    private String determineQuality() {
+        String quality = config.getPreferredQuality();
+        if (quality == null) quality = "360";
+
+        if (video == null) {
+            videoBufferTimeout = 60000;
+            return quality;
+        }
+
+        if (!"360".equals(quality)) {
+            if (video.length > 3600) {
+                quality = "360";
+                Toast.makeText(context, R.string.long_360, Toast.LENGTH_LONG).show();
+            } else if ("1080".equals(quality)) {
+                Toast.makeText(context, R.string.experimental_1080, Toast.LENGTH_LONG).show();
+            }
+        }
+
+        videoBufferTimeout = getTimeoutForQuality(quality);
+        return quality;
+    }
+
+    /**
+     * Updates and displays the progress/loading label right as playback is initiated.
+     */
+    private void updateProgressMessage(String quality) {
+        TextView progressView = (TextView) findViewById(R.id.video_progress);
+        if (progressView != null) {
+            if (quality == null) quality = "360";
+            if (config.isConvertVideos()) {
+                progressView.setText(R.string.conv_long);
+                progressView.setVisibility(View.VISIBLE);
+            } else if (!"360".equals(quality)) {
+                progressView.setText(getString(R.string.hq_long, quality));
+                progressView.setVisibility(View.VISIBLE);
+            } else {
+                progressView.setVisibility(View.GONE);
+            }
+        }
+    }
+
     private void resetVideo() {
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         cancelVideoTimeout();
+        stopPositionTracking();
         if (videoView != null) {
             videoView.stopPlayback();
             videoView.setVideoURI(null);
@@ -354,18 +427,97 @@ public class VideoActivity extends Activity {
         if (loading != null) loading.setVisibility(View.GONE);
         if (play != null) play.setVisibility(View.VISIBLE);
         if (thumbnail != null) thumbnail.setVisibility(View.VISIBLE);
+        TextView progressView = (TextView) findViewById(R.id.video_progress);
+        if (progressView != null) progressView.setVisibility(View.GONE);
+    }
+
+    private void showVideoLoadingUI() {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        View loading = findViewById(R.id.video_loading);
+        if (loading != null) loading.setVisibility(View.VISIBLE);
+        if (play != null) play.setVisibility(View.GONE);
+        if (thumbnail != null) thumbnail.setVisibility(View.INVISIBLE); // Keep it INVISIBLE to maintain bounding box size
+    }
+
+    private VideoStream selectVideoStream(String quality) {
+        List<VideoStream> targetList = "360".equals(quality)
+                ? Manager.getInstance().getVideoInstances()
+                : Manager.getInstance().getHqInstances();
+
+        if (config.isConvertVideos()) {
+            List<Conversion> conversions = Manager.getInstance().getConversion();
+            List<VideoStream> convInstances = new ArrayList<VideoStream>();
+            for (int i = 0; i < targetList.size(); i++) {
+                VideoStream vs = targetList.get(i);
+                if (vs instanceof Conversion && conversions.contains(vs)) {
+                    convInstances.add(vs);
+                }
+            }
+            if (!convInstances.isEmpty()) {
+                targetList = convInstances;
+            }
+        }
+
+        if (!targetList.isEmpty()) {
+            return targetList.get(new Random().nextInt(targetList.size()));
+        }
+        return null;
+    }
+
+    private void playVideo() {
+        if (video == null) return;
+        streamRetryCount = 0;
+        showVideoLoadingUI();
+        new Handler().post(new Runnable() {
+            @Override
+            public void run() {
+                final String runQuality = resolvedQuality != null ? resolvedQuality : "360";
+                updateProgressMessage(runQuality);
+                if (VideoCache.hasValidStream(videoId, runQuality)) {
+                    videoUrl = VideoCache.getStreamUrl();
+                    videoStream = VideoCache.getVideoStreamInstance();
+                    proceedPlay(videoUrl);
+                    return;
+                }
+                if (config.isConvertVideos() || !"360".equals(runQuality) || video.videoUrl == null || video.videoUrl.length() == 0) {
+                    isUsingMetadataUrl = false;
+                    if (videoStream == null) videoStream = selectVideoStream(runQuality);
+                    resolveStreamTask = new ResolveStreamTask(videoStream, runQuality);
+                    resolveStreamTask.execute(videoId, runQuality);
+                } else {
+                    isUsingMetadataUrl = true;
+                    videoUrl = video.videoUrl;
+                    VideoCache.putStream(videoId, videoUrl, "360", null); // Cache default metadata stream
+                    proceedPlay(videoUrl);
+                }
+            }
+        });
+    }
+
+    private boolean hasSoftwareKeys() {
+        if (NotPipe.SDK < 14) return false;
+        try {
+            // If the device has physical Menu and Back buttons, it does not use an on-screen nav bar.
+            // This prevents the black bar glitch on devices like Samsung tablets.
+            android.view.ViewConfiguration viewConfig = android.view.ViewConfiguration.get(this);
+            boolean hasMenuKey = ((Boolean) viewConfig.getClass().getMethod("hasPermanentMenuKey").invoke(viewConfig)).booleanValue();
+            boolean hasBackKey = android.view.KeyCharacterMap.deviceHasKey(android.view.KeyEvent.KEYCODE_BACK);
+            return !hasMenuKey && !hasBackKey;
+        } catch (Exception e) {
+            return true;
+        }
     }
 
     private void hideSystemUI() {
         try {
             View decorView = getWindow().getDecorView();
             if (NotPipe.SDK >= 14) {
-                int flags = 1 | 2 | 4;
-                if (NotPipe.SDK >= 16) {
-                    flags |= 256 | 512 | 1024;
+                int flags = 1 | 4; // SYSTEM_UI_FLAG_LOW_PROFILE | SYSTEM_UI_FLAG_FULLSCREEN
+                if (hasSoftwareKeys()) {
+                    flags |= 2; // SYSTEM_UI_FLAG_HIDE_NAVIGATION
                 }
                 if (NotPipe.SDK >= 19) {
-                    flags |= 2048;
+                    flags |= 4096; // SYSTEM_UI_FLAG_IMMERSIVE_STICKY (Better than standard IMMERSIVE)
                 }
                 decorView.getClass().getMethod("setSystemUiVisibility", int.class).invoke(decorView, flags);
             } else if (NotPipe.SDK >= 11) {
@@ -481,13 +633,17 @@ public class VideoActivity extends Activity {
                                     videoView.postDelayed(new Runnable() {
                                         @Override
                                         public void run() {
-                                            if (videoPlaying) mp.start();
+                                            if (videoPlaying) {
+                                                mp.start(); startPositionTracking();
+                                            }
                                         }
                                     }, 200);
                                 }
                             }, 100);
                         } else {
-                            if (videoPlaying) mp.start();
+                            if (videoPlaying) {
+                                mp.start(); startPositionTracking();
+                            }
                         }
                     }
                 });
@@ -505,12 +661,63 @@ public class VideoActivity extends Activity {
 
         videoView.setOnErrorListener(new MediaPlayer.OnErrorListener() {
             @Override
-            public boolean onError(MediaPlayer mp, final int what, int extra) {
+            public boolean onError(MediaPlayer mp, final int what, final int extra) {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
                         cancelVideoTimeout();
                         if (what == 43 || what == -11) return; // Ignore certain framework bugs
+
+                        // Error code indicates unsupported format
+                        if (what == 1 && extra == -2147483648) {
+                            resetVideo(); restoreVideoUI();
+                            Toast.makeText(context, R.string.unsupported_format, Toast.LENGTH_LONG).show();
+                            return;
+                        }
+
+                        // Intercept network stream buffer drops (MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO)
+                        if (what == 1 && extra == -1004) {
+                            final String savedUrl = videoUrl;
+                            if (videoView != null) {
+                                try {
+                                    int pos = videoView.getCurrentPosition();
+                                    if (pos > 0) {
+                                        videoPosition = pos;
+                                    }
+                                } catch (Exception e) { e.printStackTrace(); }
+                            }
+                            Log.d("VideoActivity", "pos:"+videoPosition);
+                            resetVideo();
+                            videoUrl = savedUrl; // Retain the url to avoid losing it during resetVideo()
+
+                            showVideoLoadingUI();
+
+                            if (retryRunnable != null) {
+                                retryHandler.removeCallbacks(retryRunnable);
+                            }
+
+                            retryRunnable = new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (isActivityStopped) {
+                                        isVideoViewNeedsReload = true;
+                                        return;
+                                    }
+                                    if (videoUrl != null) {
+                                        applyOpenCoreLayoutFix();
+                                        videoView.setVisibility(View.VISIBLE);
+                                        attachVideoListeners();
+                                        videoPlaying = true;
+                                        loadVideoUri(videoUrl);
+                                    } else {
+                                        resolveStreamTask = new ResolveStreamTask(null);
+                                        resolveStreamTask.execute(videoId);
+                                    }
+                                }
+                            };
+                            retryHandler.postDelayed(retryRunnable, 2999);
+                            return;
+                        }
 
                         resetVideo();
                         boolean isOffline = !Utils.hasConnection(context);
@@ -523,7 +730,7 @@ public class VideoActivity extends Activity {
 
                         if (isOffline || streamRetryCount < MAX_STREAM_RETRIES) {
                             if (!isOffline) streamRetryCount++;
-                            findViewById(R.id.video_loading).setVisibility(View.VISIBLE);
+                            showVideoLoadingUI();
                             resolveStreamTask = new ResolveStreamTask(null);
                             resolveStreamTask.execute(videoId);
                         } else {
@@ -560,7 +767,7 @@ public class VideoActivity extends Activity {
         outState.putBoolean("videoPrepared", videoPrepared);
         outState.putBoolean("isUsingMetadataUrl", isUsingMetadataUrl);
         outState.putBoolean("isTabletFullscreen", isTabletFullscreen);
-        outState.putSerializable("resolvedChannelIcons", resolvedChannelIcons);
+        outState.putBoolean("isFullscreenMode", isFullscreenMode); // Persist state
         if (video != null) {
             outState.putString("videoUrl", videoUrl);
             outState.putString("title", video.title);
@@ -571,7 +778,6 @@ public class VideoActivity extends Activity {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     protected void onRestoreInstanceState(Bundle savedInstanceState) {
         super.onRestoreInstanceState(savedInstanceState);
         videoId = savedInstanceState.getString("videoId");
@@ -581,15 +787,11 @@ public class VideoActivity extends Activity {
         isUsingMetadataUrl = savedInstanceState.getBoolean("isUsingMetadataUrl", false);
         videoUrl = savedInstanceState.getString("videoUrl");
         isTabletFullscreen = savedInstanceState.getBoolean("isTabletFullscreen", false);
+        isFullscreenMode = savedInstanceState.getBoolean("isFullscreenMode", false);
 
-        if (savedInstanceState.containsKey("resolvedChannelIcons")) {
-            Serializable savedIcons = savedInstanceState.getSerializable("resolvedChannelIcons");
-            if (savedIcons instanceof Hashtable) {
-                resolvedChannelIcons = (Hashtable<String, String>) savedIcons;
-            }
-        }
-
-        if (isTabletFullscreen && isTablet()) {
+        if (isFullscreenMode) {
+            enterFullscreenMode();
+        } else if (isTabletFullscreen && isTablet()) {
             enterFullscreenMode();
         }
     }
@@ -597,10 +799,23 @@ public class VideoActivity extends Activity {
     @Override
     public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
         if (keyCode == android.view.KeyEvent.KEYCODE_BACK && event.getRepeatCount() == 0) {
-            if (isTablet() && isTabletFullscreen) {
-                exitFullscreenMode();
-                isTabletFullscreen = false;
-                return true;
+            if (isFullscreenMode) {
+                if (isTablet()) {
+                    exitFullscreenMode();
+//                    isTabletFullscreen = false;
+                    return true;
+                } else {
+                    // Phone logic
+                    int currentOrientation = getResources().getConfiguration().orientation;
+                    if (currentOrientation == Configuration.ORIENTATION_LANDSCAPE) {
+                        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+//                        exitFullscreenMode();
+                        return true;
+                    } else {
+                        exitFullscreenMode();
+                        return true;
+                    }
+                }
             }
         }
         return super.onKeyDown(keyCode, event);
@@ -611,18 +826,17 @@ public class VideoActivity extends Activity {
         super.onDestroy();
         systemUiHandler.removeCallbacks(hideSystemUiRunnable);
         scrollHandler.removeCallbacks(scrollCheckRunnable);
-        cancelVideoTimeout();
-        ImageLoader.clearCache();
-
-        if (channelIconExecutor != null) {
-            channelIconExecutor.shutdownNow();
+        if (retryRunnable != null) {
+            retryHandler.removeCallbacks(retryRunnable);
         }
+        cancelVideoTimeout();
+        stopPositionTracking();
+        ImageLoader.clearCache();
 
         // Cancel all running AsyncTasks to stop background operations
         if (loadVideoTask != null) loadVideoTask.cancel(true);
         if (resolveStreamTask != null) resolveStreamTask.cancel(true);
         if (downloadVideoTask != null) downloadVideoTask.cancel(true);
-        if (convertVideoTask != null) convertVideoTask.cancel(true);
         if (loadCommentsTask != null) loadCommentsTask.cancel(true);
         if (loadRelatedTask != null) loadRelatedTask.cancel(true);
     }
@@ -630,6 +844,7 @@ public class VideoActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        stopPositionTracking();
         if (videoView != null) {
             try {
                 if (videoPrepared) {
@@ -647,10 +862,20 @@ public class VideoActivity extends Activity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        isActivityStopped = false;
+    }
+
+    @Override
     protected void onStop() {
         super.onStop();
+        isActivityStopped = true;
+        cancelVideoTimeout(); // Cancel active buffer timeouts so they don't fire in the background
+
         if (videoView != null && videoUrl != null) {
             videoView.stopPlayback();
+            videoView.setVisibility(View.GONE);
             isVideoViewNeedsReload = true;
             videoPrepared = false;
         }
@@ -662,9 +887,9 @@ public class VideoActivity extends Activity {
         if (videoUrl != null && !config.isUseExternalPlayer()) {
             if (config.isStreamPlayback() || videoUrl.startsWith(Environment.getExternalStorageDirectory().getPath()) || videoUrl.startsWith("file://")) {
                 if (isVideoViewNeedsReload) {
-                    findViewById(R.id.video_loading).setVisibility(View.VISIBLE);
-                    if (play != null) play.setVisibility(View.GONE);
-                    if (thumbnail != null) thumbnail.setVisibility(View.INVISIBLE);
+                    showVideoLoadingUI();
+
+                    updateProgressMessage(resolvedQuality);
                     applyOpenCoreLayoutFix();
                     videoView.setVisibility(View.VISIBLE);
                     attachVideoListeners();
@@ -686,6 +911,7 @@ public class VideoActivity extends Activity {
     public void onLowMemory() {
         super.onLowMemory();
         ImageLoader.clearCache();
+        VideoCache.clearAll();
     }
 
     private boolean isTablet() {
@@ -696,77 +922,123 @@ public class VideoActivity extends Activity {
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
 
+        // Only release sensor locks once back in normal portrait orientation
+        if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT && !isFullscreenMode) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        }
+
         if (isTablet()) {
-            scrollHandler.removeCallbacks(scrollCheckRunnable);
-            boolean wasVideoPlaying = videoPlaying;
-            String savedVideoUrl = videoUrl;
-            boolean savedIsUsingMetadataUrl = isUsingMetadataUrl;
-            int savedVideoPosition = videoPosition;
-            if (videoView != null && videoPrepared) {
-                try {
-                    if (videoView.isPlaying()) {
-                        wasVideoPlaying = true;
-                    }
-                    int pos = videoView.getCurrentPosition();
-                    if (pos > 0) {
-                        savedVideoPosition = pos;
-                    }
-                } catch (Exception ignored) {}
+            applyTabletLayout(newConfig.orientation);
+
+            // Tablets stay in fullscreen on rotation if manually toggled
+            if (isFullscreenMode) {
+                enterFullscreenMode();
+            } else {
+                if (videoView != null) {
+                    videoView.requestLayout();
+                    videoView.invalidate();
+                    ((AspectRatioVideoView) videoView).forceLayoutUpdate();
+                }
             }
-            videoPosition = savedVideoPosition;
-            int videoLayoutVis = videoLayout != null ? videoLayout.getVisibility() : View.GONE;
-            int loadingVis = findViewById(R.id.loading).getVisibility();
-            int thumbVis = thumbnail != null ? thumbnail.getVisibility() : View.VISIBLE;
-            int playVis = play != null ? play.getVisibility() : View.VISIBLE;
-            int videoLoadingVis = findViewById(R.id.video_loading).getVisibility();
-            int relatedLoadingVis = relatedLoading != null ? relatedLoading.getVisibility() : View.VISIBLE;
-            int commentsLoadingVis = commentsLoading != null ? commentsLoading.getVisibility() : View.VISIBLE;
-            setContentView(R.layout.activity_video);
-            setupViewReferences();
-            setupAdapters();
-            setupClickListeners();
-            setupScrollHandler();
-            View tabHostView = findViewById(android.R.id.tabhost);
-            if (tabHostView != null) {
-                if (video != null) {
-                    tabHostView.setVisibility(View.VISIBLE);
-                    setupTabHost();
+        } else {
+            // For phones:
+            if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                enterFullscreenMode();
+            } else {
+                // If exiting landscape fullscreen, or portrait fullscreen is active
+                if (isFullscreenMode && !config.isFullscreenRotateLandscape()) {
+                    enterFullscreenMode();
                 } else {
-                    tabHostView.setVisibility(View.GONE);
-                }
-            }
-
-            videoLayout.setVisibility(videoLayoutVis);
-            findViewById(R.id.loading).setVisibility(loadingVis);
-            thumbnail.setVisibility(thumbVis);
-            play.setVisibility(playVis);
-            findViewById(R.id.video_loading).setVisibility(videoLoadingVis);
-            relatedLoading.setVisibility(relatedLoadingVis);
-            commentsLoading.setVisibility(commentsLoadingVis);
-            restoreVideoMetadata();
-            if (savedVideoUrl != null) {
-                videoPrepared = false;
-                videoPlaying = wasVideoPlaying;
-                videoUrl = savedVideoUrl;
-                isUsingMetadataUrl = savedIsUsingMetadataUrl;
-                if (config.isStreamPlayback() || videoUrl.startsWith(Environment.getExternalStorageDirectory().getPath()) || videoUrl.startsWith("file://")) {
-                    applyOpenCoreLayoutFix();
-                    videoView.setVisibility(View.VISIBLE);
-                    play.setVisibility(View.GONE);
-                    thumbnail.setVisibility(View.INVISIBLE);
-                    attachVideoListeners();
-                    loadVideoUri(savedVideoUrl);
-                    isVideoViewNeedsReload = false;
+                    exitFullscreenMode();
                 }
             }
         }
+    }
 
-        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE)
-            enterFullscreenMode();
-        else {
-            isTabletFullscreen = false;
-            exitFullscreenMode();
+    private void applyTabletLayout(int orientation) {
+        LinearLayout mainContentLayout = (LinearLayout) findViewById(R.id.main_content_layout);
+        View videoLayout = findViewById(R.id.video_layout);
+        ViewGroup portraitTabContainer = (ViewGroup) findViewById(R.id.portrait_tab_container);
+        ViewGroup landscapeTabContainer = (ViewGroup) findViewById(R.id.landscape_tab_container);
+        TabHost tabHost = (TabHost) findViewById(android.R.id.tabhost);
+        View tabsScrollView = findViewById(R.id.tabs_scroll_view);
+        View fsButton = findViewById(R.id.full_screen);
+
+        if (mainContentLayout == null || videoLayout == null || portraitTabContainer == null
+                || landscapeTabContainer == null || tabHost == null) {
+            return;
         }
+
+        if (fsButton != null) {
+            // Only visible in tablet landscape layout, and only if NOT currently in fullscreen
+            if (orientation == Configuration.ORIENTATION_LANDSCAPE && !isFullscreenMode) {
+                fsButton.setVisibility(View.VISIBLE);
+            } else {
+                fsButton.setVisibility(View.GONE);
+            }
+        }
+
+        // Detach TabHost from its current parent
+        ViewGroup currentParent = (ViewGroup) tabHost.getParent();
+        if (currentParent != null) {
+            currentParent.removeView(tabHost);
+        }
+
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            mainContentLayout.setOrientation(LinearLayout.HORIZONTAL);
+
+            LinearLayout.LayoutParams videoParams = new LinearLayout.LayoutParams(
+                    0,
+                    ViewGroup.LayoutParams.FILL_PARENT,
+                    6.0f
+            );
+            videoLayout.setLayoutParams(videoParams);
+
+            LinearLayout.LayoutParams tabParams = new LinearLayout.LayoutParams(
+                    0,
+                    ViewGroup.LayoutParams.FILL_PARENT,
+                    3.5f
+            );
+            landscapeTabContainer.setLayoutParams(tabParams);
+
+            landscapeTabContainer.setVisibility(isFullscreenMode ? View.GONE : View.VISIBLE);
+            portraitTabContainer.setVisibility(View.GONE);
+
+            landscapeTabContainer.addView(tabHost, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.FILL_PARENT,
+                    ViewGroup.LayoutParams.FILL_PARENT
+            ));
+
+            if (tabsScrollView != null) {
+                tabsScrollView.getLayoutParams().height = ViewGroup.LayoutParams.FILL_PARENT;
+                tabsScrollView.requestLayout();
+            }
+        } else {
+            mainContentLayout.setOrientation(LinearLayout.VERTICAL);
+
+            LinearLayout.LayoutParams videoParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.FILL_PARENT,
+                    ViewGroup.LayoutParams.FILL_PARENT,
+                    1.0f
+            );
+            videoLayout.setLayoutParams(videoParams);
+
+            landscapeTabContainer.setVisibility(View.GONE);
+            portraitTabContainer.setVisibility(isFullscreenMode ? View.GONE : View.VISIBLE);
+
+            portraitTabContainer.addView(tabHost, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.FILL_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            ));
+
+            if (tabsScrollView != null) {
+                tabsScrollView.getLayoutParams().height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                tabsScrollView.requestLayout();
+            }
+        }
+
+        hideDummyTab();
+        triggerLayoutFix(tabHost);
     }
 
     private void toggleActionBar(boolean show) {
@@ -790,64 +1062,96 @@ public class VideoActivity extends Activity {
     }
 
     private void enterFullscreenMode() {
-        if (isTablet() && !isTabletFullscreen) return;
+        isFullscreenMode = true;
+        isTabletFullscreen = true;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
         toggleActionBar(false);
 
-        if (isTabletFullscreen) {
-            hideSystemUI();
-            systemUiHandler.removeCallbacks(hideSystemUiRunnable);
-            systemUiHandler.postDelayed(hideSystemUiRunnable, 5000);
-        }
+        hideSystemUI();
+        systemUiHandler.removeCallbacks(hideSystemUiRunnable);
+        systemUiHandler.postDelayed(hideSystemUiRunnable, 5000);
 
         if (scrollView != null) scrollView.setVisibility(View.GONE);
         if (videoFrame != null) videoFrame.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, ViewGroup.LayoutParams.FILL_PARENT, 1.0f));
 
-        // Hide the right-side TabHost panel for tablets
-        if (isTablet() && isTabletFullscreen) {
-            View tabHost = findViewById(android.R.id.tabhost);
-            if (tabHost != null && tabHost.getParent() instanceof View) {
-                ((View) tabHost.getParent()).setVisibility(View.GONE);
-            }
+        View tabHost = findViewById(android.R.id.tabhost);
+        if (tabHost != null && tabHost.getParent() instanceof View) {
+            ((View) tabHost.getParent()).setVisibility(View.GONE);
         }
 
         FrameLayout.LayoutParams videoParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, ViewGroup.LayoutParams.FILL_PARENT);
         videoParams.gravity = android.view.Gravity.CENTER;
         videoView.setLayoutParams(videoParams);
         ((AspectRatioVideoView) videoView).setFullscreen(true);
-    }
 
-    private void exitFullscreenMode() {
-        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
-        toggleActionBar(true);
-        if (isTablet() && !isTabletFullscreen) return;
-        showSystemUI();
-        systemUiHandler.removeCallbacks(hideSystemUiRunnable);
-        if (scrollView != null) scrollView.setVisibility(View.VISIBLE);
-        if (videoFrame != null) videoFrame.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        if (isTablet()) {
-            View tabHost = findViewById(android.R.id.tabhost);
-            if (tabHost != null && tabHost.getParent() instanceof View) {
-                ((View) tabHost.getParent()).setVisibility(View.VISIBLE);
-            }
-            hideDummyTab();
-        }
-        FrameLayout.LayoutParams videoParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, ViewGroup.LayoutParams.FILL_PARENT);
-        videoParams.gravity = android.view.Gravity.CENTER;
-        videoView.setLayoutParams(videoParams);
-        if (isOpencore) {
-            videoView.post(new Runnable() {
+        // Fix for the Action Bar Gap & SurfaceView bug.
+        // Wait ~300ms for the Action Bar hide animation to finish, then force the layout to snap to the new bounds.
+        if (NotPipe.SDK >= 11) {
+            videoView.postDelayed(new Runnable() {
                 @Override
                 public void run() {
+                    if (videoLayout != null) {
+                        videoLayout.requestLayout();
+                        videoLayout.invalidate();
+                    }
+                    if (videoFrame != null) {
+                        videoFrame.requestLayout();
+                        videoFrame.invalidate();
+                    }
                     videoView.requestLayout();
                     videoView.invalidate();
                     ((AspectRatioVideoView) videoView).forceLayoutUpdate();
                 }
-            });
+            }, 300);
+        }
+    }
+
+    private void exitFullscreenMode() {
+        isFullscreenMode = false;
+        isTabletFullscreen = false;
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
+        toggleActionBar(true);
+        showSystemUI();
+        systemUiHandler.removeCallbacks(hideSystemUiRunnable);
+        if (scrollView != null) scrollView.setVisibility(View.VISIBLE);
+        if (videoFrame != null) videoFrame.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        View tabHost = findViewById(android.R.id.tabhost);
+        if (tabHost != null && tabHost.getParent() instanceof View) {
+            ((View) tabHost.getParent()).setVisibility(View.VISIBLE);
+        }
+        if (isTablet()) {
+            applyTabletLayout(getResources().getConfiguration().orientation);
+        }
+        FrameLayout.LayoutParams videoParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, ViewGroup.LayoutParams.FILL_PARENT);
+        videoParams.gravity = android.view.Gravity.CENTER;
+        videoView.setLayoutParams(videoParams);
+        Runnable updateLayout = new Runnable() {
+            @Override
+            public void run() {
+                if (videoLayout != null) {
+                    videoLayout.requestLayout();
+                    videoLayout.invalidate();
+                }
+                videoView.requestLayout();
+                videoView.invalidate();
+                ((AspectRatioVideoView) videoView).forceLayoutUpdate();
+            }
+        };
+        if (isOpencore) {
+            videoView.post(updateLayout);
+        } else {
+            // Force re-layout after Action Bar expands so bounds snap properly
+            videoView.postDelayed(updateLayout, 300);
         }
         ((AspectRatioVideoView) videoView).setFullscreen(false);
+        videoView.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (!isActivityStopped) setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+            }
+        }, 350);
     }
 
     private void setupViewReferences() {
@@ -1030,7 +1334,7 @@ public class VideoActivity extends Activity {
         findViewById(R.id.channel).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                if (video == null) return;
+                if (video == null || video.channelId == null || video.channelId.length() == 0) return;
                 Intent intent = new Intent(VideoActivity.this, ChannelActivity.class);
                 intent.putExtra("ID", video.channelId);
                 startActivity(intent);
@@ -1039,44 +1343,21 @@ public class VideoActivity extends Activity {
             }
         });
 
-        if (video != null && thumbnail != null) {
-            View.OnClickListener playVideo = new View.OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                    streamRetryCount = 0;
-                    if (!config.isUseExternalPlayer()) {
-                        thumbnail.setVisibility(View.INVISIBLE);
-                        play.setVisibility(View.GONE);
-                    }
-                    findViewById(R.id.video_loading).setVisibility(View.VISIBLE);
-                    new Handler().post(new Runnable() {
-                        @Override
-                        public void run() {
-                            final String quality = config.getPreferredQuality();
-                            if (config.isConvertVideos() || !"360".equals(quality) || video.videoUrl == null || video.videoUrl.length() == 0) {
-                                isUsingMetadataUrl = false;
-                                resolveStreamTask = new ResolveStreamTask(null);
-                                resolveStreamTask.execute(videoId);
-                            } else {
-                                isUsingMetadataUrl = true;
-                                videoUrl = video.videoUrl;
-                                proceedPlay(videoUrl);
-                            }
-                        }
-                    });
-                }
-            };
-            thumbnail.setOnClickListener(playVideo);
-            play.setOnClickListener(playVideo);
-        }
+        View.OnClickListener playVideoListener = new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                playVideo();
+            }
+        };
+        if (thumbnail != null) thumbnail.setOnClickListener(playVideoListener);
+        if (play != null) play.setOnClickListener(playVideoListener);
 
         View fullScreenBtn = findViewById(R.id.full_screen);
         if (fullScreenBtn != null) {
             fullScreenBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
-                    isTabletFullscreen = true;
-                    enterFullscreenMode();
+                    enterFullscreenByConfig();
                 }
             });
         }
@@ -1085,7 +1366,7 @@ public class VideoActivity extends Activity {
             videoFrame.setOnTouchListener(new View.OnTouchListener() {
                 @Override
                 public boolean onTouch(View v, android.view.MotionEvent event) {
-                    if (isTablet() && isTabletFullscreen && event.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                    if (isFullscreenMode && event.getAction() == android.view.MotionEvent.ACTION_DOWN) {
                         showSystemUI();
                         systemUiHandler.removeCallbacks(hideSystemUiRunnable);
                         systemUiHandler.postDelayed(hideSystemUiRunnable, 5000);
@@ -1103,23 +1384,25 @@ public class VideoActivity extends Activity {
             tabHost.clearAllTabs();
         }
         tabHost.setup();
-        // Android Holo has a bug where the first tab gets randomly removed in landscape orientation. It does not get removed when the user enters and
+        // Android Holo has a bug where the first tab gets randomly removed in landscape orientation. It gets back again when the user enters and
         // exits full screen mode, and it isn't present in normal non-tablet UI, so we use a dummy tab as a tablet workaround
+        boolean hasDummy = false;
         if (isTablet() && NotPipe.SDK >= 11) {
             tabHost.addTab(tabHost.newTabSpec("dummy").setIndicator("").setContent(new TabHost.TabContentFactory() {
                 public View createTabContent(String tag) {
                     return new View(VideoActivity.this);
                 }
             }));
+            hasDummy = true;
         }
         tabHost.addTab(tabHost.newTabSpec("related").setIndicator(getString(R.string.related)).setContent(R.id.related));
         tabHost.addTab(tabHost.newTabSpec("comments").setIndicator(getString(R.string.comments)).setContent(R.id.comments));
+
         TabWidget widget = tabHost.getTabWidget();
         if (widget != null) {
             if (isTablet() && NotPipe.SDK >= 11) {
                 hideDummyTab();
             } else if (NotPipe.SDK < 11) {
-                // Android <3.0 do not support tabs without icons, which causes them to be too tall. This can be fixed programmatically as follows
                 int height = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 33f, getResources().getDisplayMetrics());
                 for (int i = 0; i < widget.getChildCount(); i++) {
                     View child = widget.getChildAt(i);
@@ -1130,9 +1413,15 @@ public class VideoActivity extends Activity {
             }
         }
         tabHost.setOnTabChangedListener(new TabHost.OnTabChangeListener() {
-            public void onTabChanged(String tabId) {
-                if (tabId.equals("related")) loadRelatedVideos();
-                else /*if (tabId.equals("comments"))*/ loadComments();
+            public void onTabChanged(final String tabId) {
+                tabHost.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if ("related".equals(tabId)) loadRelatedVideos();
+                        else loadComments();
+                    }
+                });
+
                 Runnable layoutFix = new Runnable() {
                     @Override
                     public void run() {
@@ -1154,7 +1443,9 @@ public class VideoActivity extends Activity {
                 }
             }
         });
-        tabHost.setCurrentTabByTag("related");
+
+        // If a dummy tab was inserted at index 0, select the "related" tab (index 1) explicitly
+        if (hasDummy) tabHost.setCurrentTab(1);
     }
 
     private void setupScrollHandler() {
@@ -1171,9 +1462,8 @@ public class VideoActivity extends Activity {
             public void run() {
                 final boolean isOffline = !Utils.hasConnection(context);
                 Object instanceToRemove = isUsingMetadataUrl ? api : videoStream;
-                if (instanceToRemove != null && !isOffline) {
+                if (instanceToRemove != null && !isOffline)
                     Manager.getInstance().removeDeadInstance(instanceToRemove);
-                }
                 isUsingMetadataUrl = false;
                 resetVideo();
 
@@ -1182,10 +1472,7 @@ public class VideoActivity extends Activity {
                     public void run() {
                         if (isOffline || streamRetryCount < MAX_STREAM_RETRIES) {
                             if (!isOffline) streamRetryCount++;
-
-                            findViewById(R.id.video_loading).setVisibility(View.VISIBLE);
-                            thumbnail.setVisibility(View.INVISIBLE);
-                            play.setVisibility(View.GONE);
+                            showVideoLoadingUI();
                             resolveStreamTask = new ResolveStreamTask(null);
                             resolveStreamTask.execute(videoId);
                         } else {
@@ -1196,7 +1483,7 @@ public class VideoActivity extends Activity {
                 });
             }
         };
-        videoTimeoutHandler.postDelayed(videoTimeoutRunnable, VIDEO_BUFFER_TIMEOUT);
+        videoTimeoutHandler.postDelayed(videoTimeoutRunnable, videoBufferTimeout);
     }
 
     private void cancelVideoTimeout() {
@@ -1208,15 +1495,20 @@ public class VideoActivity extends Activity {
 
     private void loadRelatedVideos() {
         if (relatedLoaded || video == null) return;
+        TextView noRelatedView = (TextView) findViewById(R.id.no_related);
         if (video.related != null && !video.related.isEmpty()) {
             relatedVideos.clear();
             relatedVideos.addAll(video.related);
             relatedAdapter.notifyDataSetChanged();
             relatedLoading.setVisibility(View.GONE);
             relatedLoaded = true;
+            if (noRelatedView != null) noRelatedView.setVisibility(View.GONE);
+            triggerLayoutFix(relatedList);
         } else {
             if (loadRelatedTask != null && loadRelatedTask.getStatus() != AsyncTask.Status.FINISHED) return;
-            relatedLoading.setVisibility(View.VISIBLE); // Reveal spinner on retry
+            relatedLoading.setVisibility(View.VISIBLE);
+            if (noRelatedView != null) noRelatedView.setVisibility(View.GONE);
+            triggerLayoutFix(relatedLoading);
             loadRelatedTask = new LoadRelatedTask();
             loadRelatedTask.execute(videoId);
         }
@@ -1230,9 +1522,11 @@ public class VideoActivity extends Activity {
             commentsAdapter.notifyDataSetChanged();
             commentsLoading.setVisibility(View.GONE);
             commentsLoaded = true;
+            triggerLayoutFix(commentsList);
         } else {
             if (loadCommentsTask != null && loadCommentsTask.getStatus() != AsyncTask.Status.FINISHED) return;
-            commentsLoading.setVisibility(View.VISIBLE); // Reveal spinner on retry
+            commentsLoading.setVisibility(View.VISIBLE);
+            triggerLayoutFix(commentsLoading);
             loadCommentsTask = new LoadCommentsTask();
             loadCommentsTask.execute(videoId);
         }
@@ -1284,6 +1578,7 @@ public class VideoActivity extends Activity {
     }
 
     private void loadVideoUri(final String targetUrl) {
+        Log.d("VideoActivity", targetUrl);
         if (config.isAsyncSetVideoUri()) {
             boolean surfaceReady = false;
             try {
@@ -1301,9 +1596,7 @@ public class VideoActivity extends Activity {
                 // Surface is fully ready right now, safe to run async
                 executeAsyncSetVideoUri(targetUrl);
             } else {
-                // If the surface isn't ready, the async thread will blast through setVideoURI in 10ms
-                // and defer the actual heavy loading to the UI thread's surfaceCreated callback (freezing it).
-                // Instead, we wait for surfaceCreated, then run our async task to ensure the background thread catches the load.
+                // If the surface isn't ready, wait for surfaceCreated first
                 videoView.getHolder().addCallback(new android.view.SurfaceHolder.Callback() {
                     @Override
                     public void surfaceCreated(android.view.SurfaceHolder holder) {
@@ -1333,6 +1626,280 @@ public class VideoActivity extends Activity {
         }
     }
 
+    /**
+     * Android 4.1 has a weird bug with tabs, where if the video is currently playing, the tab contents can disappear.
+     * This is especially visible on TouchWiz. This method fixes this issue.
+     * @param targetView view to fix
+     */
+    private void triggerLayoutFix(final View targetView) {
+        if (targetView == null) return;
+        targetView.post(new Runnable() {
+            @Override
+            public void run() {
+                // 1. Invalidate and lay out the target view
+                targetView.requestLayout();
+                targetView.invalidate();
+
+                // On tablets, the layout is side-by-side and more stable.
+                // We bypass the scroll-nudge and full decor-view invalidations to prevent scrolling stutter.
+                if (!isTablet()) {
+                    // 2. Invalidate parent scroll views & execute a 1-pixel scroll nudge to force rendering
+                    if (scrollView != null) {
+                        scrollView.requestLayout();
+                        scrollView.invalidate();
+                        scrollView.scrollBy(0, 1);
+                        scrollView.scrollBy(0, -1);
+                    }
+                    if (tabsScrollView != null) {
+                        tabsScrollView.requestLayout();
+                        tabsScrollView.invalidate();
+                        tabsScrollView.scrollBy(0, 1);
+                        tabsScrollView.scrollBy(0, -1);
+                    }
+
+                    // 3. Force the absolute window root to re-evaluate all child views
+                    if (getWindow() != null && getWindow().getDecorView() != null) {
+                        getWindow().getDecorView().requestLayout();
+                        getWindow().getDecorView().invalidate();
+                    }
+                }
+
+                checkVisibleItems();
+            }
+        });
+    }
+
+    private void onVideoDataLoaded(final Video fetchedVideo) {
+        video = fetchedVideo;
+
+        if (video.channelId != null && video.channelThumbnail != null && video.channelThumbnail.length() > 0)
+            ChannelIconResolver.setResolved(video.channelId, video.channelThumbnail);
+        findViewById(R.id.loading).setVisibility(View.GONE);
+        videoLayout.setVisibility(View.VISIBLE);
+
+        ((TextView) findViewById(R.id.title)).setText(video.title);
+        ((TextView) findViewById(R.id.channel_title)).setText(video.channel);
+        ((TextView) findViewById(R.id.subscribers)).setText(Utils.formatNumber(context, video.subscribers));
+        if (video.likes > 0)
+            ((Button) findViewById(R.id.like)).setText(Utils.formatNumber(context, video.likes));
+        ((TextView) findViewById(R.id.views)).setText(getString(R.string.views, Utils.formatNumber(context, video.views)) +
+                "   " + Utils.formatTimeAgo(context, video.publishedAt));
+
+        resolvedQuality = determineQuality();
+
+        final String quality = resolvedQuality;
+
+        if (!VideoCache.hasValidStream(videoId, quality)) {
+            if (config.isConvertVideos() || !"360".equals(quality) || video.videoUrl == null || video.videoUrl.length() == 0) {
+                isUsingMetadataUrl = false;
+                if (videoStream == null) {
+                    videoStream = selectVideoStream(quality);
+                } if (videoStream != null) {
+                    updatePlaybackViaText(videoStream.getHost());
+                }
+            } else {
+                isUsingMetadataUrl = true;
+                updatePlaybackViaText(api.getHost());
+            }
+        } else {
+            videoStream = VideoCache.getVideoStreamInstance();
+            isUsingMetadataUrl = (videoStream == null);
+            if (videoStream != null) {
+                updatePlaybackViaText(videoStream.getHost());
+            } else if (isUsingMetadataUrl) {
+                updatePlaybackViaText(api.getHost());
+            }
+        }
+
+        ImageLoader.loadImage(video.thumbnail, thumbnail, false);
+        ImageLoader.loadImage(video.channelThumbnail, channelThumbnail, false);
+
+        View tabHostView = findViewById(android.R.id.tabhost);
+        if (tabHostView != null) {
+            tabHostView.setVisibility(View.VISIBLE);
+        }
+
+        loadRelatedVideos();
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        // Inflate the menu XML resource
+        getMenuInflater().inflate(R.menu.menu_video, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        // Retrieve items using the IDs defined in XML
+        MenuItem qualityItem = menu.findItem(R.id.action_video_quality);
+        if (qualityItem != null) {
+            qualityItem.setVisible(!config.isConvertVideos());
+        }
+
+        MenuItem fullscreenItem = menu.findItem(R.id.action_full_screen);
+        if (fullscreenItem != null) {
+            boolean isPortrait = getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
+            fullscreenItem.setVisible(isPortrait && !isFullscreenMode);
+        }
+        return super.onPrepareOptionsMenu(menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        int itemId = item.getItemId();
+
+        if (itemId == R.id.action_video_quality) {
+            showQualityDialog();
+            return true;
+        } else if (itemId == R.id.action_full_screen) {
+            enterFullscreenByConfig();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private void enterFullscreenByConfig() {
+        isFullscreenMode = true;
+        isTabletFullscreen = true;
+        if (config.isFullscreenRotateLandscape()) {
+            // Lock the orientation to landscape first to block sensor rotation
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+            if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                // Already in landscape, enter fullscreen directly
+                enterFullscreenMode();
+            }
+            // If in portrait, setRequestedOrientation will trigger onConfigurationChanged,
+            // which will subsequently handle entering fullscreen.
+        } else {
+            enterFullscreenMode();
+        }
+    }
+
+    /**
+     * Renders quality options selection dialog. Includes warning prompts for high quality choices
+     * and duration restriction validations based on standard player behavior.
+     */
+    private void showQualityDialog() {
+        if (video == null) {
+            Toast.makeText(context, "Please wait for video to load", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Limit change if length exceeds 1 hour (3600 seconds) - handles criteria from determineQuality()
+        if (video.length > 3600) {
+            Toast.makeText(context, R.string.long_360, Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        String currentQuality = config.getPreferredQuality();
+        if (currentQuality == null) {
+            currentQuality = "360";
+        }
+
+        final String[] displayQualities = getResources().getStringArray(R.array.qualities);
+        final String[] qualities = new String[displayQualities.length];
+        for (int i = 0; i < displayQualities.length; i++) {
+            qualities[i] = displayQualities[i].replace("p", "");
+        }
+
+        int checkedItem = 0;
+        for (int i = 0; i < qualities.length; i++) {
+            if (qualities[i].equals(currentQuality)) {
+                checkedItem = i;
+                break;
+            }
+        }
+
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.select_quality)
+                .setSingleChoiceItems(displayQualities, checkedItem, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        dialog.dismiss();
+                        final String selectedQuality = qualities[which];
+                        if (selectedQuality.equals(config.getPreferredQuality())) return; // Avoid unnecessary reloads if selecting the same quality
+
+                        if ("1080".equals(selectedQuality)) {
+                            new AlertDialog.Builder(context)
+                                    .setTitle(android.R.string.dialog_alert_title)
+                                    .setMessage(R.string.experimental_1080)
+                                    .setPositiveButton(android.R.string.yes, new DialogInterface.OnClickListener() {
+                                        @Override
+                                        public void onClick(DialogInterface d, int w) {
+                                            applyQuality(selectedQuality);
+                                        }
+                                    })
+                                    .setNegativeButton(android.R.string.cancel, null)
+                                    .show();
+                        } else applyQuality(selectedQuality);
+                    }
+                }).setNegativeButton(android.R.string.cancel, null).show();
+    }
+
+    /**
+     * Formally saves the preferred quality selection, stops existing play states,
+     * and performs stream re-resolution.
+     */
+    private void applyQuality(String newQuality) {
+        config.setPreferredQuality(newQuality);
+        ConfigManager.getInstance().saveConfig(config);
+        config = ConfigManager.getInstance().getConfig();
+
+        resolvedQuality = newQuality;
+        videoBufferTimeout = getTimeoutForQuality(newQuality);
+
+        if (videoView != null) {
+            try {
+                if (videoPrepared) {
+                    int pos = videoView.getCurrentPosition();
+                    if (pos > 0) {
+                        videoPosition = pos;
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            resetVideo();
+            restoreVideoUI();
+        }
+
+        if (video != null) {
+            showVideoLoadingUI();
+            updateProgressMessage(newQuality);
+
+            if (resolveStreamTask != null) {
+                resolveStreamTask.cancel(true);
+            }
+            if (downloadVideoTask != null) {
+                downloadVideoTask.cancel(true);
+            }
+
+            if (VideoCache.hasValidStream(videoId, newQuality)) {
+                videoUrl = VideoCache.getStreamUrl();
+                videoStream = VideoCache.getVideoStreamInstance();
+                isUsingMetadataUrl = (videoStream == null);
+                proceedPlay(videoUrl);
+                return;
+            }
+
+            if (config.isConvertVideos() || !"360".equals(newQuality) || video.videoUrl == null || video.videoUrl.length() == 0) {
+                isUsingMetadataUrl = false;
+
+                if (videoStream == null) {
+                    videoStream = selectVideoStream(newQuality);
+                }
+
+                resolveStreamTask = new ResolveStreamTask(videoStream, newQuality);
+                resolveStreamTask.execute(videoId, newQuality);
+            } else {
+                isUsingMetadataUrl = true;
+                videoUrl = video.videoUrl;
+                VideoCache.putStream(videoId, videoUrl, "360", videoStream);
+                proceedPlay(videoUrl);
+            }
+        }
+    }
+
     private class LoadVideoTask extends AsyncTask<String, Void, Video> {
         @Override
         protected Video doInBackground(String... params) {
@@ -1340,6 +1907,7 @@ public class VideoActivity extends Activity {
                 if (isCancelled()) return null;
                 return api.getVideo(params[0]);
             } catch (Exception e) {
+                e.printStackTrace();
                 return null;
             }
         }
@@ -1352,79 +1920,9 @@ public class VideoActivity extends Activity {
                 Toast.makeText(context, R.string.metadata_fail, Toast.LENGTH_SHORT).show();
                 return;
             }
-            video = fetchedVideo;
-            if (video.channelId != null && video.channelThumbnail != null && video.channelThumbnail.length() > 0)
-                resolvedChannelIcons.put(video.channelId, video.channelThumbnail);
-            findViewById(R.id.loading).setVisibility(View.GONE);
-            videoLayout.setVisibility(View.VISIBLE);
 
-            ((TextView) findViewById(R.id.title)).setText(video.title);
-            ((TextView) findViewById(R.id.channel_title)).setText(video.channel);
-            ((TextView) findViewById(R.id.subscribers)).setText(Utils.formatNumber(context, video.subscribers));
-            if (video.likes > 0)
-                ((Button) findViewById(R.id.like)).setText(Utils.formatNumber(context, video.likes));
-            ((TextView) findViewById(R.id.views)).setText(getString(R.string.views, Utils.formatNumber(context, video.views)) +
-                    "   " + Utils.formatTimeAgo(context, video.publishedAt));
-
-            final String quality = config.getPreferredQuality();
-            if (config.isConvertVideos() || !"360".equals(quality) || video.videoUrl == null || video.videoUrl.length() == 0) {
-                List<VideoStream> targetList = "360".equals(quality) ? Manager.getInstance().getVideoInstances() : Manager.getInstance().getHqInstances();
-                if (config.isConvertVideos()) {
-                    List<VideoStream> ytApiLegacy = new ArrayList<VideoStream>();
-                    for (int i = 0; i < targetList.size(); i++) {
-                        if (targetList.get(i) instanceof YtApiLegacy)
-                            ytApiLegacy.add(targetList.get(i));
-                    }
-                    if (!ytApiLegacy.isEmpty()) targetList = ytApiLegacy;
-                }
-                if (!targetList.isEmpty()) {
-                    videoStream = targetList.get(new Random().nextInt(targetList.size()));
-                    updatePlaybackViaText(videoStream.getHost());
-                }
-            } else {
-                isUsingMetadataUrl = true;
-                videoStream = null;
-                updatePlaybackViaText(api.getHost());
-            }
-
-            View.OnClickListener playVideo = new View.OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                    streamRetryCount = 0;
-                    if (!config.isUseExternalPlayer()) {
-                        thumbnail.setVisibility(View.INVISIBLE);
-                        play.setVisibility(View.GONE);
-                    }
-                    findViewById(R.id.video_loading).setVisibility(View.VISIBLE);
-                    new Handler().post(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (config.isConvertVideos() || !"360".equals(quality) || video.videoUrl == null || video.videoUrl.length() == 0) {
-                                isUsingMetadataUrl = false;
-                                resolveStreamTask = new ResolveStreamTask(null);
-                                resolveStreamTask.execute(videoId);
-                            } else {
-                                isUsingMetadataUrl = true;
-                                videoUrl = video.videoUrl;
-                                proceedPlay(videoUrl);
-                            }
-                        }
-                    });
-                }
-            };
-
-            ImageLoader.loadImage(video.thumbnail, thumbnail, false);
-            ImageLoader.loadImage(video.channelThumbnail, channelThumbnail, false);
-            thumbnail.setOnClickListener(playVideo);
-            play.setOnClickListener(playVideo);
-
-            // Now that the main video is completely loaded, reveal and setup the tabs side-panel
-            View tabHostView = findViewById(android.R.id.tabhost);
-            if (tabHostView != null) {
-                tabHostView.setVisibility(View.VISIBLE);
-            }
-
-            loadRelatedVideos();
+            VideoCache.put(videoId, fetchedVideo, api);
+            onVideoDataLoaded(fetchedVideo);
         }
     }
 
@@ -1451,18 +1949,7 @@ public class VideoActivity extends Activity {
                 // Reuse the instance already picked by LoadVideoTask
                 if (videoStream == null) {
                     String quality = taskQuality != null ? taskQuality : config.getPreferredQuality();
-                    List<VideoStream> targetList = "360".equals(quality) ? Manager.getInstance().getVideoInstances() : Manager.getInstance().getHqInstances();
-                    if (config.isConvertVideos()) {
-                        List<VideoStream> ytApiLegacy = new ArrayList<VideoStream>();
-                        for (int i = 0; i < targetList.size(); i++) {
-                            if (targetList.get(i) instanceof YtApiLegacy)
-                                ytApiLegacy.add(targetList.get(i));
-                        }
-                        if (!ytApiLegacy.isEmpty()) targetList = ytApiLegacy;
-                    }
-                    if (!targetList.isEmpty()) {
-                        videoStream = targetList.get(new Random().nextInt(targetList.size()));
-                    }
+                    videoStream = selectVideoStream(quality);
                 }
             } else {
                 videoStream = targetInstance;
@@ -1477,27 +1964,44 @@ public class VideoActivity extends Activity {
             } catch (IOException e) {
                 return null;
             }
-
             try {
                 String id = params[0];
                 if (isCancelled()) return null;
                 File cachedVideo = getCachedVideoFile(id);
                 if (cachedVideo.exists()) return cachedVideo.getAbsolutePath();
-                String quality = params.length > 1 ? params[1] : config.getPreferredQuality();
+                String quality = params.length > 1 ? params[1] : (taskQuality != null ? taskQuality : (resolvedQuality != null ? resolvedQuality : config.getPreferredQuality()));
+                if (quality == null) {
+                    quality = "360";
+                }
                 requestedQuality = quality;
+                int timeout = getTimeoutForQuality(quality);
                 if (targetInstance != null) {
-                    if (config.isConvertVideos() && targetInstance instanceof YtApiLegacy) {
+                    try {
+                        if (config.isConvertVideos() && targetInstance instanceof Conversion) {
+                            if (isCancelled()) return null;
+                            return ((Conversion) targetInstance).getConvUrl(id, config.getConvertCodec());
+                        }
                         if (isCancelled()) return null;
-                        return ((YtApiLegacy) targetInstance).getConvUrl(id, config.getConvertCodec());
+                        return targetInstance.getVideoUrl(id, quality, timeout);
+                    } catch (Exception e) {
+                        if (isCancelled()) return null;
+                        // If it is a FileNotFoundException and conversion is NOT enabled,
+                        // it means the video itself is missing (404), so we should rethrow it.
+                        if (e instanceof java.io.FileNotFoundException && !config.isConvertVideos()) {
+                            throw e;
+                        }
+                        // Exclude this instance from conversion list on any failure
+                        if (config.isConvertVideos() && targetInstance instanceof Conversion) {
+                            Manager.getInstance().getConversion().remove((Conversion) targetInstance);
+                        }
+                        // Set targetInstance to null to prevent the task from prioritizing it in subsequent Manager calls
+                        targetInstance = null;
                     }
-                    if (isCancelled()) return null;
-                    return targetInstance.getVideoUrl(id, quality);
                 }
                 if (isCancelled()) return null;
-                if (config.isConvertVideos()) {
-                    return Manager.getInstance().getVideoUrl(id, quality, config.getConvertCodec(), videoStream, successInstance);
-                }
-                return Manager.getInstance().getVideoUrl(id, quality, videoStream, successInstance);
+                if (config.isConvertVideos())
+                    return Manager.getInstance().getConvUrl(id, quality, config.getConvertCodec(), targetInstance, successInstance);
+                return Manager.getInstance().getVideoUrl(id, quality, timeout, targetInstance, successInstance);
             } catch (java.io.FileNotFoundException e) {
                 isFileNotFound = true;
                 errorMessage = e.getMessage();
@@ -1514,30 +2018,23 @@ public class VideoActivity extends Activity {
             isUsingMetadataUrl = false;
 
             if (resultUrl != null) {
-                // DELETE THIS LINE: videoUrl = resultUrl;
                 if (successInstance[0] != null) {
                     videoStream = successInstance[0];
                 }
+                VideoCache.putStream(videoId, resultUrl, requestedQuality, videoStream);
                 if (resultUrl.startsWith(Environment.getExternalStorageDirectory().getPath())) {
                     updatePlaybackViaText(getString(R.string.cache));
                     proceedPlay(resultUrl);
                 } else {
                     if (videoStream != null) updatePlaybackViaText(videoStream.getHost());
                     TextView progressView = (TextView) findViewById(R.id.video_progress);
-                    if (config.isConvertVideos() && resultUrl.contains("&codec=")) {
+                    if (config.isConvertVideos()) {
                         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                         if (progressView != null) {
                             progressView.setText(R.string.conv_long);
                             progressView.setVisibility(View.VISIBLE);
                         }
                         proceedPlay(resultUrl);
-                    } else if (config.isConvertVideos()) {
-                        if (progressView != null) {
-                            progressView.setText(getString(R.string.dvauha_msg, getString(R.string.loading)));
-                            progressView.setVisibility(View.VISIBLE);
-                        }
-                        convertVideoTask = new ConvertVideoTask();
-                        convertVideoTask.execute(resultUrl);
                     } else {
                         proceedPlay(resultUrl);
                     }
@@ -1552,10 +2049,11 @@ public class VideoActivity extends Activity {
                     Toast.makeText(context, "All instances failed to provide video.", Toast.LENGTH_SHORT).show();
                 } else {
                     Toast.makeText(context, R.string.no_quality, Toast.LENGTH_SHORT).show();
-                    if (video.videoUrl != null && video.videoUrl.length() > 0) {
+                    resolvedQuality = "360"; videoBufferTimeout = 60000;
+                    if (video != null && video.videoUrl != null && video.videoUrl.length() > 0) {
                         isUsingMetadataUrl = true;
                         updatePlaybackViaText(api.getHost());
-                        proceedPlay(videoUrl);
+                        proceedPlay(video.videoUrl);
                     } else {
                         isUsingMetadataUrl = false;
                         resolveStreamTask = new ResolveStreamTask(null, "360");
@@ -1584,6 +2082,13 @@ public class VideoActivity extends Activity {
         boolean forceDownload = config.isConvertVideos() && !isLocal;
         boolean shouldStream = (config.isStreamPlayback() && !forceDownload) || isLocal;
 
+        if (isLocal)
+            updatePlaybackViaText(getString(R.string.cache));
+        else if (isUsingMetadataUrl)
+            updatePlaybackViaText(api.getHost());
+        else if (videoStream != null)
+            updatePlaybackViaText(videoStream.getHost());
+
         if (config.isUseExternalPlayer()) {
             if (shouldStream) {
                 findViewById(R.id.video_loading).setVisibility(View.GONE);
@@ -1601,6 +2106,18 @@ public class VideoActivity extends Activity {
         } else {
             resetVideo();
             videoPlaying = true;
+
+            if (isActivityStopped) {
+                // Keep the background resolution running, but do not touch the UI/player yet.
+                // Save the URL, and let onResume handle the playback when the user returns.
+                videoUrl = shouldStream ? targetUrl : null;
+                if (!shouldStream) {
+                    downloadVideoTask = new DownloadVideoTask();
+                    downloadVideoTask.execute(targetUrl);
+                }
+                return;
+            }
+
             applyOpenCoreLayoutFix();
             attachVideoListeners();
 
@@ -1625,6 +2142,8 @@ public class VideoActivity extends Activity {
         protected void onPreExecute() {
             progressView = (TextView) findViewById(R.id.video_progress);
             progressView.setVisibility(View.VISIBLE);
+            // Prevent the screen from going to sleep while downloading
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
 
         @Override
@@ -1647,15 +2166,39 @@ public class VideoActivity extends Activity {
                 if (!videoFile.exists()) {
                     HttpClient.downloadToFile(downloadUrl, videoFile.getAbsolutePath(), new HttpClient.DownloadProgressListener() {
                         private long lastUpdateTime = 0;
+                        private long lastUpdateBytes = 0;
+
                         @Override
                         public void onProgress(final long bytesDownloaded, final long totalBytes) {
                             if (isCancelled()) return;
-                            if (totalBytes > 0) {
-                                long currentTime = System.currentTimeMillis();
-                                if (currentTime - lastUpdateTime >= 500) {
-                                    lastUpdateTime = currentTime;
-                                    publishProgress((int) ((bytesDownloaded * 100) / totalBytes));
+
+                            // Don't overwrite the "Converting..." label until the server starts sending data
+                            if (bytesDownloaded == 0) return;
+
+                            long currentTime = System.currentTimeMillis();
+                            if (lastUpdateTime == 0) {
+                                lastUpdateTime = currentTime;
+                                lastUpdateBytes = bytesDownloaded;
+                                return;
+                            }
+
+                            long timeElapsed = currentTime - lastUpdateTime;
+                            if (timeElapsed >= 500) {
+                                long bytesSentInInterval = bytesDownloaded - lastUpdateBytes;
+                                int speedKB = 0;
+                                if (timeElapsed > 0) {
+                                    speedKB = (int) ((bytesSentInInterval * 1000) / (timeElapsed * 1024));
                                 }
+                                int percent = -1;
+                                if (totalBytes > 0) {
+                                    percent = (int) ((bytesDownloaded * 100) / totalBytes);
+                                }
+
+                                // Pass current progress, instantaneous speed, and total KB downloaded
+                                publishProgress(percent, speedKB, (int) (bytesDownloaded / 1024));
+
+                                lastUpdateTime = currentTime;
+                                lastUpdateBytes = bytesDownloaded;
                             }
                         }
                     });
@@ -1675,7 +2218,31 @@ public class VideoActivity extends Activity {
 
         @Override
         protected void onProgressUpdate(Integer... values) {
-            progressView.setText(getString(R.string.percent, values[0]));
+            if (values.length >= 2) {
+                int percent = values[0];
+                int speedKB = values[1];
+                if (percent >= 0) {
+                    progressView.setText(getString(R.string.percent, percent) + " (" + speedKB + " KB/s)");
+                } else {
+                    if (values.length >= 3) {
+                        double downloadedMB = values[2] / 1024.0;
+                        progressView.setText(String.format(Locale.US, "%.1f MB (%d KB/s)", downloadedMB, speedKB));
+                    } else {
+                        progressView.setText(speedKB + " KB/s");
+                    }
+                }
+            } else if (values.length == 1) {
+                progressView.setText(getString(R.string.percent, values[0]));
+            }
+        }
+
+        @Override
+        protected void onCancelled() {
+            // Restore screen sleep behavior if download was aborted
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            if (progressView != null) {
+                progressView.setVisibility(View.GONE);
+            }
         }
 
         @Override
@@ -1707,10 +2274,10 @@ public class VideoActivity extends Activity {
                     resetVideo();
                     videoUrl = Uri.fromFile(videoFile).toString();
                     videoPlaying = true;
+                    if (isActivityStopped) return;
                     applyOpenCoreLayoutFix();
                     attachVideoListeners();
 
-                    videoUrl = Uri.fromFile(videoFile).toString();
                     videoView.setVisibility(View.VISIBLE);
                     loadVideoUri(videoUrl);
                 }
@@ -1725,139 +2292,13 @@ public class VideoActivity extends Activity {
 
                 if (isOffline || streamRetryCount < MAX_STREAM_RETRIES) {
                     if (!isOffline) streamRetryCount++;
-                    findViewById(R.id.video_loading).setVisibility(View.VISIBLE);
-                    thumbnail.setVisibility(View.INVISIBLE);
-                    play.setVisibility(View.GONE);
+                    showVideoLoadingUI();
                     resolveStreamTask = new ResolveStreamTask(null);
                     resolveStreamTask.execute(videoId);
                 } else {
                     restoreVideoUI();
                     Toast.makeText(context, "Download failed after multiple attempts.", Toast.LENGTH_SHORT).show();
                 }
-            }
-        }
-    }
-
-    private class ConvertVideoTask extends AsyncTask<String, String, String> {
-        private String targetUrl;
-        private Exception convertException;
-
-        @Override
-        protected void onPreExecute() {
-            TextView progressView = (TextView) findViewById(R.id.video_progress);
-            if (progressView != null) {
-                progressView.setText(getString(R.string.dvauha_msg, getString(R.string.loading)));
-                progressView.setVisibility(View.VISIBLE);
-            }
-        }
-
-        @Override
-        protected String doInBackground(String... params) {
-            this.targetUrl = params[0];
-            final String[] resultUrl = new String[1];
-
-            try {
-                DvaUha.convert(targetUrl, config.getConvertCodec(), new DvaUha.Callback() {
-                    @Override
-                    public void onMessage(String msg) {
-                        if (isCancelled()) return;
-                        publishProgress(msg);
-                    }
-
-                    @Override
-                    public void onSuccess(String url) {
-                        resultUrl[0] = url;
-                    }
-
-                    @Override
-                    public void onError(Exception e) {
-                        convertException = e;
-                    }
-
-                    @Override
-                    public String onCaptchaRequired(final String imageUrl) {
-                        if (isCancelled()) return "";
-                        final String[] result = new String[]{""};
-                        final Object lock = new Object();
-                        runOnUiThread(new Runnable() {
-                            public void run() {
-                                AlertDialog.Builder builder = new AlertDialog.Builder(context);
-                                builder.setTitle(R.string.dvauha);
-
-                                LinearLayout layout = new LinearLayout(context);
-                                layout.setOrientation(LinearLayout.VERTICAL);
-                                layout.setPadding(15, 15, 15, 15);
-                                layout.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-
-                                final ImageView imageView = new ImageView(context);
-                                imageView.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                                imageView.setMinimumHeight(100);
-                                layout.addView(imageView);
-
-                                final android.widget.EditText input = new android.widget.EditText(context);
-                                input.setSingleLine();
-                                input.setHint(R.string.solve_captcha);
-                                layout.addView(input);
-
-                                builder.setView(layout);
-                                builder.setCancelable(false);
-                                builder.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
-                                    @Override
-                                    public void onClick(DialogInterface dialog, int which) {
-                                        result[0] = input.getText().toString();
-                                        synchronized (lock) {
-                                            lock.notify();
-                                        }
-                                    }
-                                });
-                                builder.setNegativeButton(android.R.string.cancel, new DialogInterface.OnClickListener() {
-                                    @Override
-                                    public void onClick(DialogInterface dialog, int which) {
-                                        synchronized (lock) {
-                                            lock.notify();
-                                        }
-                                    }
-                                });
-                                builder.show();
-                                ImageLoader.loadImage(imageUrl, imageView, false);
-                            }
-                        });
-                        synchronized (lock) {
-                            try {
-                                lock.wait();
-                            } catch (InterruptedException ignored) {}
-                        }
-                        return result[0];
-                    }
-                });
-            } catch (Exception e) {
-                convertException = e;
-            }
-            if (isCancelled()) return null;
-            return resultUrl[0];
-        }
-
-        @Override
-        protected void onProgressUpdate(String... values) {
-            if (isCancelled()) return;
-            TextView progressView = (TextView) findViewById(R.id.video_progress);
-            if (progressView != null)
-                progressView.setText(getString(R.string.dvauha_msg, values[0]));
-        }
-
-        @Override
-        protected void onPostExecute(String downloadUrl) {
-            if (isCancelled()) return;
-            TextView progressView = (TextView) findViewById(R.id.video_progress);
-            if (progressView != null) progressView.setVisibility(View.GONE);
-
-            if (downloadUrl != null) {
-                proceedPlay(downloadUrl);
-            } else {
-                resetVideo();
-                restoreVideoUI();
-                String errorMsg = convertException == null ? "Unknown conversion error" : convertException.getMessage();
-                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show();
             }
         }
     }
@@ -1876,37 +2317,27 @@ public class VideoActivity extends Activity {
         @Override
         protected void onPostExecute(List<Comment> result) {
             if (isCancelled()) return;
+            TextView noCommentsView = (TextView) findViewById(R.id.no_comments);
+
             if (result != null) {
                 comments.clear();
                 comments.addAll(result);
                 commentsAdapter.notifyDataSetChanged();
                 commentsLoaded = true;
+
+                if (noCommentsView != null) {
+                    if (comments.isEmpty()) {
+                        noCommentsView.setVisibility(View.VISIBLE);
+                    } else {
+                        noCommentsView.setVisibility(View.GONE);
+                    }
+                }
+            } else {
+                if (noCommentsView != null) noCommentsView.setVisibility(View.GONE);
             }
             commentsLoading.setVisibility(View.GONE);
 
-            Runnable layoutFix = new Runnable() {
-                @Override
-                public void run() {
-                    if (scrollView != null) {
-                        scrollView.requestLayout();
-                        scrollView.invalidate();
-                    }
-                    if (tabsScrollView != null) {
-                        tabsScrollView.requestLayout();
-                        tabsScrollView.invalidate();
-                    }
-                    if (commentsList != null) {
-                        commentsList.requestLayout();
-                        commentsList.invalidate();
-                    }
-                }
-            };
-
-            if (tabsScrollView != null) {
-                tabsScrollView.post(layoutFix);
-            } else if (scrollView != null) {
-                scrollView.post(layoutFix);
-            }
+            triggerLayoutFix(commentsList);
         }
     }
 
@@ -1924,37 +2355,24 @@ public class VideoActivity extends Activity {
         @Override
         protected void onPostExecute(List<VideoInfo> result) {
             if (isCancelled()) return;
+            TextView noRelatedView = (TextView) findViewById(R.id.no_related);
             if (result != null) {
                 relatedVideos.clear();
                 relatedVideos.addAll(result);
                 relatedAdapter.notifyDataSetChanged();
                 relatedLoaded = true;
-            }
-            relatedLoading.setVisibility(View.GONE);
-
-            Runnable layoutFix = new Runnable() {
-                @Override
-                public void run() {
-                    if (scrollView != null) {
-                        scrollView.requestLayout();
-                        scrollView.invalidate();
-                    }
-                    if (tabsScrollView != null) {
-                        tabsScrollView.requestLayout();
-                        tabsScrollView.invalidate();
-                    }
-                    if (relatedList != null) {
-                        relatedList.requestLayout();
-                        relatedList.invalidate();
+                if (noRelatedView != null) {
+                    if (relatedVideos.isEmpty()) {
+                        noRelatedView.setVisibility(View.VISIBLE);
+                    } else {
+                        noRelatedView.setVisibility(View.GONE);
                     }
                 }
-            };
-
-            if (tabsScrollView != null) {
-                tabsScrollView.post(layoutFix);
-            } else if (scrollView != null) {
-                scrollView.post(layoutFix);
+            } else {
+                if (noRelatedView != null) noRelatedView.setVisibility(View.GONE);
             }
+            relatedLoading.setVisibility(View.GONE);
+            triggerLayoutFix(relatedList);
         }
     }
 }

@@ -49,8 +49,8 @@
         <item quantity="other">%d лет назад</item>
     </plurals>
     <string name="comments">Комментарии</string>
-    <string name="no_trending">Попробуйте найти что-нибудь</string>
-    <string name="no_trending_">Не найдено трендовых видео.</string>
+    <string name="no_popular">Попробуйте найти что-нибудь</string>
+    <string name="no_popular_">Не найдено популярных видео.</string>
     <string name="playback_via">Воспроизведение через %s &gt;</string>
     <string name="related">Похожие</string>
     <string name="share">Поделиться</string>
@@ -83,14 +83,11 @@
     <string name="instance_exist">Инстанс уже введён</string>
     <string name="url">Введите URL</string>
     <string name="conversion">Конвертация</string>
-    <string name="conversion_">Конвертация поможет, если устройство не поддерживает H.264, а MX Player тормозит или недоступен. Инстансы YtAPILegacy используют внутреннюю конвертацию и пробуются в первую очередь. Для остальных API конвертация работает через сайт cnv.2yxa.mobi. Необходима SD-карта. При конвертации не пытайтесь просматривать длинные видео. <b>Не включайте, если видео работают нормально.</b></string>
+    <string name="conversion_">Конвертация поможет, если устройство не поддерживает H.264, а MX Player тормозит или недоступен. Конвертация доступна только с инстансами yt2009 и YtAPILegacy. Необходима SD-карта. При конвертации не пытайтесь просматривать длинные видео. <b>Не включайте, если видео работают нормально.</b></string>
     <string name="convert_videos">Конвертировать видео</string>
     <string name="updating_instances">Обновление инстансов</string>
     <string name="video_codec">Видеокодек</string>
     <string name="setting_footer">notPipe — клиент YouTube для старых андроидов\n▶ github.com/gohoski/notPipe\n▶ t.me/AppDataApps</string>
-    <string name="dvauha">2уха</string>
-    <string name="solve_captcha">Решите капчу</string>
-    <string name="dvauha_msg">2уха - %s</string>
     <string name="loading">Загрузка</string>
     <string name="dead_instance">Инстанс %s мёртв, переключаемся</string>
     <string name="try_again">Попробуйте снова</string>
@@ -112,4 +109,17 @@
     <string name="async_uri">Асинхронная инициализация плеера</string>
     <string name="async_uri_">Может устранить зависание на некоторых устройствах с Android 4.0–4.3. Включите, если приложение зависает на несколько секунд перед воспроизведением.</string>
     <string name="sd_card_space">На SD-карте недостаточно свободного места</string>
+    <string name="confirm_exit">Для выхода нажмите «Назад»</string>
+    <string name="unsupported_format">Данный формат не поддерживается вашим устройством. Попробуйте сменить качество или плеер.</string>
+    <string name="for_you">Для вас</string>
+    <string name="hq_long">Обработка %sp может занять некоторое время. Пожалуйста, подождите.</string>
+    <string name="experimental_1080">1080p является экспериментальным; пожалуйста, используйте 720p для стабильности</string>
+    <string name="no_related">Похожих видео не найдено</string>
+    <string name="no_comments">Комментариев не найдено</string>
+    <string name="no_videos">Видео не найдено</string>
+    <string name="videos">Видео</string>
+    <string name="long_360">Видео длится более часа, качество снижено до 360p</string>
+    <string name="select_quality">Выберите качество видео</string>
+    <string name="latest">Новые</string>
+    <string name="popular">Популярные</string>
 </resources>

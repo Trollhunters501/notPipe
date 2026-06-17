@@ -9,5 +9,5 @@ import java.io.IOException;
 public interface VideoStream {
     String getName(); String getHost();
 
-    String getVideoUrl(String id, String quality) throws IOException;
+    String getVideoUrl(String id, String quality, int timeout) throws IOException;
 }

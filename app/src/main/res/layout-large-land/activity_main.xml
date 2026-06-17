@@ -4,11 +4,8 @@
     android:layout_width="fill_parent"
     android:layout_height="fill_parent"
     android:orientation="vertical">
-    <!-- Normal portrait layout -->
+    <!-- Landscape video layout for tablets (large-land) -->
 
-    <!--This invisible view steals the initial focus so the keyboard
-      doesn't pop up on start, but allows the ListView to be
-      focused normally via D-pad.-->
     <View
         android:layout_width="0px"
         android:layout_height="0px"
@@ -77,15 +74,20 @@
         android:textSize="18sp"
         android:visibility="gone" />
 
-    <ListView
+    <GridView
         android:id="@+id/videos"
         android:layout_width="fill_parent"
         android:layout_height="fill_parent"
+        android:numColumns="auto_fit"
+        android:columnWidth="280dp"
+        android:stretchMode="columnWidth"
+        android:verticalSpacing="20dp"
+        android:horizontalSpacing="20dp"
         android:paddingLeft="24dp"
         android:paddingRight="24dp"
         android:clipToPadding="false"
         android:scrollbarStyle="outsideOverlay"
-        tools:listitem="@layout/item_video"
         android:clickable="true"
-        android:choiceMode="none" />
+        android:choiceMode="none"
+        tools:listitem="@layout/item_video"/>
 </LinearLayout>

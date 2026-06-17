@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_video_quality"
+        android:title="@string/video_quality"
+        android:icon="@android:drawable/ic_menu_preferences" />
+    <item
+        android:id="@+id/action_full_screen"
+        android:title="@string/full_screen"
+        android:icon="@drawable/ic_full_screen" />
+</menu>

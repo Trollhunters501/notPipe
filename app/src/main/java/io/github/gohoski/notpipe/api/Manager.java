@@ -22,6 +22,7 @@ import io.github.gohoski.notpipe.NotPipe;
 import io.github.gohoski.notpipe.R;
 import io.github.gohoski.notpipe.config.Config;
 import io.github.gohoski.notpipe.config.ConfigManager;
+import io.github.gohoski.notpipe.http.HttpClient;
 import io.github.gohoski.notpipe.http.VideoTooLongException;
 
 /**
@@ -33,9 +34,10 @@ public class Manager {
     private ConfigManager configManager;
 
     private List<Metadata> metadataInstances;
-    private List<Trending> trendingInstances;
     private List<VideoStream> videoInstances; //360p only
     private List<VideoStream> hqInstances; //high-quality instances (480p+)
+    private List<Conversion> conversionInstances; // Tracks instances capable of conversion
+    private List<ChannelApi> channelApiInstances; // Tracks instances capable of ChannelApi
 
     private Manager() {
         random = new Random();
@@ -59,13 +61,15 @@ public class Manager {
         if (metadataInstances == null) {
             metadataInstances = new ArrayList<Metadata>();
             videoInstances = new ArrayList<VideoStream>();
-            trendingInstances = new ArrayList<Trending>();
             hqInstances = new ArrayList<VideoStream>();
+            conversionInstances = new ArrayList<Conversion>();
+            channelApiInstances = new ArrayList<ChannelApi>();
         } else {
             metadataInstances.clear();
             videoInstances.clear();
-            trendingInstances.clear();
             hqInstances.clear();
+            conversionInstances.clear();
+            channelApiInstances.clear();
         }
 
         if (configManager == null) {
@@ -73,15 +77,6 @@ public class Manager {
         }
 
         Config config = configManager.getConfig();
-
-        List<String> ytApiInstances = config.getYtApiLegacyInstances();
-        for (int i = 0; i < ytApiInstances.size(); i++) {
-            YtApiLegacy ytApi = new YtApiLegacy(ytApiInstances.get(i));
-            metadataInstances.add(ytApi);
-            trendingInstances.add(ytApi);
-            videoInstances.add(ytApi);
-            hqInstances.add(ytApi);
-        }
 
         List<String> invInstances = config.getInvidiousInstances();
         for (int i = 0; i < invInstances.size(); i++) {
@@ -95,9 +90,28 @@ public class Manager {
             Yt2009 yt2009 = new Yt2009(yt2009List.get(i));
             videoInstances.add(yt2009);
             hqInstances.add(yt2009);
+            conversionInstances.add(yt2009);
+            channelApiInstances.add(yt2009);
         }
 
-        videoInstances.add(new S60Tube());
+        List<String> pipedList = config.getPipedInstances();
+        for (int i = 0; i < pipedList.size(); i++) {
+            String[] parts = pipedList.get(i).split(",", 2);
+            String baseUrl = parts[0];
+            String proxyUrl = parts.length > 1 ? parts[1] : parts[0];
+            Piped piped = new Piped(baseUrl, proxyUrl);
+            metadataInstances.add(piped);
+            videoInstances.add(piped);
+        }
+
+        List<String> ytApiInstances = config.getYtApiLegacyInstances();
+        for (int i = 0; i < ytApiInstances.size(); i++) {
+            YtApiLegacy ytApi = new YtApiLegacy(ytApiInstances.get(i));
+            metadataInstances.add(ytApi);
+            videoInstances.add(ytApi);
+            hqInstances.add(ytApi);
+            conversionInstances.add(ytApi);
+        }
     }
 
     public Metadata getMetadata() {
@@ -105,9 +119,39 @@ public class Manager {
         return createStatefulFallbackProxy(Metadata.class, metadataInstances);
     }
 
-    public Trending getTrending() {
-        if (trendingInstances.isEmpty()) throw new IllegalStateException("No Trending instances");
-        return createStatefulFallbackProxy(Trending.class, trendingInstances);
+    /**
+     * Retrieves a single raw Metadata instance without a dynamic fallback proxy wrapper.
+     * Useful for optional single-attempt fallback operations (like channel icons).
+     */
+    public Metadata getRandomMetadata() {
+        if (metadataInstances == null || metadataInstances.isEmpty()) {
+            return null;
+        }
+        return metadataInstances.get(random.nextInt(metadataInstances.size()));
+    }
+
+    /**
+     * Retrieves a Metadata proxy prioritizing YtApiLegacy instances.
+     * Returns null if no YtApiLegacy instances are configured.
+     */
+    public Metadata getPopularMetadata() {
+        if (metadataInstances == null || metadataInstances.isEmpty()) {
+            return null;
+        }
+
+        List<Metadata> ytApiList = new ArrayList<Metadata>();
+        for (int i = 0; i < metadataInstances.size(); i++) {
+            Metadata m = metadataInstances.get(i);
+            if (m instanceof YtApiLegacy) {
+                ytApiList.add(m);
+            }
+        }
+
+        if (ytApiList.isEmpty()) {
+            return null;
+        }
+
+        return createStatefulFallbackProxy(Metadata.class, ytApiList);
     }
 
     public VideoStream getVideoStream() {
@@ -115,18 +159,26 @@ public class Manager {
         return createStatefulFallbackProxy(VideoStream.class, videoInstances);
     }
 
-    public String getVideoUrl(String videoId, String quality) throws IOException {
-        return getVideoUrl(videoId, quality, null, null);
+    public ChannelApi getChannelApi() {
+        if (channelApiInstances.isEmpty()) throw new IllegalStateException("No ChannelApi instances");
+        return createStatefulFallbackProxy(ChannelApi.class, channelApiInstances);
     }
 
-    public String getVideoUrl(String videoId, String quality, VideoStream preferredInstance, VideoStream[] successfulInstance) throws IOException {
+    public List<Conversion> getConversion() {
+        return conversionInstances;
+    }
+
+    public String getVideoUrl(String videoId, String quality, int timeout) throws IOException {
+        return getVideoUrl(videoId, quality, timeout, null, null);
+    }
+
+    public String getVideoUrl(String videoId, String quality, int timeout, VideoStream preferredInstance, VideoStream[] successfulInstance) throws IOException {
         List<VideoStream> targetList = "360".equals(quality) ? new ArrayList<VideoStream>(videoInstances) : new ArrayList<VideoStream>(hqInstances);
         if (targetList.isEmpty()) {
             reloadInstances();
             throw new IOException("No video instances left");
         }
 
-        // Prioritize the preferred instance if provided, shuffle the rest
         if (preferredInstance != null && targetList.contains(preferredInstance)) {
             targetList.remove(preferredInstance);
             targetList.add(0, preferredInstance);
@@ -143,14 +195,12 @@ public class Manager {
         for (int i = 0; i < targetList.size(); i++) {
             VideoStream currentInstance = targetList.get(i);
             try {
-                String url = currentInstance.getVideoUrl(videoId, quality);
+                String url = currentInstance.getVideoUrl(videoId, quality, timeout);
                 if (successfulInstance != null && successfulInstance.length > 0) {
                     successfulInstance[0] = currentInstance;
                 }
                 return url;
             } catch (FileNotFoundException e) {
-                // Quality not available on this instance, don't try others for this quality
-                // Let it bubble up to trigger 360p fallback
                 throw e;
             } catch (Exception e) {
                 if (isDeadInstanceError(e)) {
@@ -171,105 +221,52 @@ public class Manager {
         throw new IOException("All instances failed");
     }
 
-    public String getVideoUrl(String videoId, String quality, int codec) throws IOException {
-        return getVideoUrl(videoId, quality, codec, null, null);
+    public String getConvUrl(String videoId, String quality, int codec) throws IOException {
+        return getConvUrl(videoId, quality, codec, null, null);
     }
 
-    public String getVideoUrl(String videoId, String quality, int codec, VideoStream preferredInstance, VideoStream[] successfulInstance) throws IOException {
-        List<VideoStream> targetList = "360".equals(quality) ? new ArrayList<VideoStream>(videoInstances) : new ArrayList<VideoStream>(hqInstances);
-        if (targetList.isEmpty()) {
-            reloadInstances();
-            throw new IOException("No video instances left");
-        }
-
+    public String getConvUrl(String videoId, String quality, int codec, VideoStream preferredInstance, VideoStream[] successfulInstance) throws IOException {
         if (configManager.getConfig().isConvertVideos()) {
-            List<YtApiLegacy> ytApiLegacyInstances = new ArrayList<YtApiLegacy>();
-            List<VideoStream> otherInstances = new ArrayList<VideoStream>();
-            for (int i = 0; i < targetList.size(); i++) {
-                VideoStream instance = targetList.get(i);
-                if (instance instanceof YtApiLegacy) {
-                    ytApiLegacyInstances.add((YtApiLegacy) instance);
-                } else {
-                    otherInstances.add(instance);
-                }
+            if (conversionInstances.isEmpty()) {
+                reloadInstances();
+                throw new IOException("No conversion instances left");
             }
 
-            // Try YtAPILegacy instances first for conversion
-            if (preferredInstance instanceof YtApiLegacy && ytApiLegacyInstances.contains(preferredInstance)) {
-                ytApiLegacyInstances.remove(preferredInstance);
-                ytApiLegacyInstances.add(0, (YtApiLegacy) preferredInstance);
-                if (ytApiLegacyInstances.size() > 1) {
-                    List<YtApiLegacy> rest = ytApiLegacyInstances.subList(1, ytApiLegacyInstances.size());
+            List<Conversion> targetConvList = new ArrayList<Conversion>(conversionInstances);
+
+            // Prioritize the preferred instance if it supports conversion
+            if (preferredInstance instanceof Conversion && targetConvList.contains((Conversion) preferredInstance)) {
+                targetConvList.remove((Conversion) preferredInstance);
+                targetConvList.add(0, (Conversion) preferredInstance);
+                if (targetConvList.size() > 1) {
+                    List<Conversion> rest = targetConvList.subList(1, targetConvList.size());
                     java.util.Collections.shuffle(rest, random);
                 }
             } else {
-                java.util.Collections.shuffle(ytApiLegacyInstances, random);
+                java.util.Collections.shuffle(targetConvList, random);
             }
 
-            if (!ytApiLegacyInstances.isEmpty()) {
-                for (int i = 0; i < ytApiLegacyInstances.size(); i++) {
-                    YtApiLegacy currentInstance = ytApiLegacyInstances.get(i);
-                    try {
-                        String url = currentInstance.getConvUrl(videoId, codec);
-                        if (successfulInstance != null && successfulInstance.length > 0) {
-                            successfulInstance[0] = currentInstance;
-                        }
-                        return url;
-                    } catch (Exception e) {
-                        if (e instanceof VideoTooLongException) {
-                            throw (VideoTooLongException) e;
-                        }
-                        if (isDeadInstanceError(e)) {
-                            removeDeadInstance(currentInstance);
-                        }
+            for (int i = 0; i < targetConvList.size(); i++) {
+                Conversion currentInstance = targetConvList.get(i);
+                try {
+                    String url = currentInstance.getConvUrl(videoId, codec);
+                    if (successfulInstance != null && successfulInstance.length > 0 && currentInstance instanceof VideoStream) {
+                        successfulInstance[0] = (VideoStream) currentInstance;
+                    }
+                    return url;
+                } catch (Exception e) {
+                    if (e instanceof VideoTooLongException) {
+                        throw (VideoTooLongException) e;
+                    } conversionInstances.remove(currentInstance);
+                    if (isDeadInstanceError(e)) {
+                        removeDeadInstance(currentInstance);
                     }
                 }
             }
-
-            // No YtAPILegacy instances left or all failed, use other instances (which falls back to DvaUha)
-            targetList = otherInstances;
         }
 
-        if (preferredInstance != null && targetList.contains(preferredInstance)) {
-            targetList.remove(preferredInstance);
-            targetList.add(0, preferredInstance);
-            if (targetList.size() > 1) {
-                List<VideoStream> rest = targetList.subList(1, targetList.size());
-                java.util.Collections.shuffle(rest, random);
-            }
-        } else {
-            java.util.Collections.shuffle(targetList, random);
-        }
-
-        Throwable lastError = null;
-        for (int i = 0; i < targetList.size(); i++) {
-            VideoStream currentInstance = targetList.get(i);
-            try {
-                String url = currentInstance.getVideoUrl(videoId, quality);
-                if (successfulInstance != null && successfulInstance.length > 0) {
-                    successfulInstance[0] = currentInstance;
-                }
-                return url;
-            } catch (FileNotFoundException e) {
-                // Quality not available on this instance, don't try others for this quality
-                // Let it bubble up to trigger 360p fallback
-                throw e;
-            } catch (Exception e) {
-                if (isDeadInstanceError(e)) {
-                    removeDeadInstance(currentInstance);
-                }
-                lastError = e;
-            }
-        }
-        if (lastError != null) {
-            if (videoInstances.isEmpty() || hqInstances.isEmpty()) {
-                reloadInstances();
-                showConnectionErrorToast();
-            }
-            if (lastError instanceof IOException) throw (IOException) lastError;
-            throw new IOException(lastError.getMessage());
-        }
-        throw new IOException(lastError != null ? lastError.getMessage() : "All instances failed, check your Internet connection!");
+        // Fall back to standard stream URLs if conversion is disabled or if all conversion attempts fail
+        return getVideoUrl(videoId, quality, HttpClient.CONVERSION_TIMEOUT, preferredInstance, successfulInstance);
     }
 
     /**
@@ -305,6 +302,7 @@ public class Manager {
                             try {
                                 return method.invoke(currentInstance, args);
                             } catch (InvocationTargetException e) {
+                                e.printStackTrace();
                                 lastError = e.getCause();
                                 localPool.remove(currentInstance);
 
@@ -332,13 +330,12 @@ public class Manager {
         try {
             host = (String) instance.getClass().getMethod("getHost").invoke(instance);
             notifyDeadInstance(host);
-        } catch (Exception ignored) {
-            return;
-        }
+        } catch (Exception ignored) { return; }
         removeByHost(metadataInstances, host);
-        removeByHost(trendingInstances, host);
         removeByHost(videoInstances, host);
         removeByHost(hqInstances, host);
+        removeByHost(conversionInstances, host);
+        removeByHost(channelApiInstances, host);
     }
 
     private void removeByHost(List list, String host) {
@@ -434,7 +431,7 @@ public class Manager {
             info.instance = instance;
             info.host = instance.getHost();
             info.name = instance.getName();
-            info.supportsAllQualities = !(instance instanceof Invidious || instance instanceof S60Tube);
+            info.supportsAllQualities = !(instance instanceof Invidious) && !(instance instanceof Piped);
             if (!processed.contains(info.host)) {
                 result.add(info);
                 processed.add(info.host);

@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:orientation="horizontal"
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent">
+
+    <!-- Left Column: Channel Info and Branding -->
+    <LinearLayout
+        android:layout_width="280dp"
+        android:layout_height="fill_parent"
+        android:orientation="vertical"
+        android:background="@android:color/transparent">
+
+        <ImageView
+            android:id="@+id/banner"
+            android:layout_width="fill_parent"
+            android:layout_height="90dp"
+            android:scaleType="centerCrop"/>
+
+        <!-- ScrollView prevents descriptions from overflowing smaller tablet screens -->
+        <ScrollView
+            android:layout_width="fill_parent"
+            android:layout_height="fill_parent"
+            android:fadingEdge="vertical">
+
+            <LinearLayout
+                android:id="@+id/channel"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingLeft="16dp"
+                android:paddingTop="12dp"
+                android:paddingRight="16dp"
+                android:paddingBottom="12dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <ImageView
+                    android:id="@+id/thumbnail"
+                    android:layout_width="60dp"
+                    android:layout_height="60dp"
+                    android:layout_marginBottom="8dp"
+                    tools:src="@android:drawable/ic_popup_sync"/>
+
+                <TextView
+                    android:id="@+id/title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    tools:text="Goida"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="@android:color/primary_text_dark_nodisable"
+                    android:layout_marginBottom="4dp"/>
+
+                <TextView
+                    android:id="@+id/subscribers"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    tools:text="417 тыс. подписчиков"
+                    android:layout_marginBottom="8dp"/>
+
+                <TextView
+                    android:id="@+id/description"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    tools:text="Lorem ipsum dolor sit amet, consectetur adipiscing elit."
+                    android:ellipsize="end"/>
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+
+    <!-- Subtle vertical divider line -->
+    <View
+        android:layout_width="1dp"
+        android:layout_height="fill_parent"
+        android:background="#33CCCCCC"/>
+
+    <FrameLayout
+        android:layout_width="0dp"
+        android:layout_height="fill_parent"
+        android:layout_weight="1">
+        <ProgressBar
+            android:id="@+id/loading"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            tools:visibility="gone"/>
+
+        <io.github.gohoski.notpipe.ui.FixedTabHost
+            android:id="@android:id/tabhost"
+            android:layout_width="fill_parent"
+            android:layout_height="fill_parent"
+            android:visibility="gone"
+            tools:visibility="visible">
+            <LinearLayout
+                android:layout_width="fill_parent"
+                android:layout_height="fill_parent"
+                android:orientation="vertical">
+                <TabWidget
+                    android:id="@android:id/tabs"
+                    android:layout_width="fill_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingLeft="16dp"
+                    android:paddingRight="16dp">
+                </TabWidget>
+                <FrameLayout
+                    android:id="@android:id/tabcontent"
+                    android:layout_width="fill_parent"
+                    android:layout_height="fill_parent">
+
+                    <LinearLayout
+                        android:id="@+id/for_you"
+                        android:layout_width="fill_parent"
+                        android:layout_height="fill_parent"
+                        android:orientation="vertical"
+                        android:visibility="gone"
+                        tools:visibility="visible">
+                        <ProgressBar
+                            android:id="@+id/for_you_loading"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center_horizontal"/>
+                        <GridView
+                            android:id="@+id/for_you_list"
+                            android:layout_width="fill_parent"
+                            android:layout_height="fill_parent"
+                            android:numColumns="auto_fit"
+                            android:columnWidth="280dp"
+                            android:stretchMode="columnWidth"
+                            android:verticalSpacing="20dp"
+                            android:horizontalSpacing="20dp"
+                            android:paddingLeft="24dp"
+                            android:paddingRight="24dp"
+                            android:clipToPadding="false"
+                            android:scrollbarStyle="outsideOverlay"
+                            android:clickable="true"
+                            android:choiceMode="none"
+                            android:visibility="gone"
+                            tools:visibility="visible"
+                            tools:listitem="@layout/item_video_compact"/>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/videos"
+                        android:layout_width="fill_parent"
+                        android:layout_height="fill_parent"
+                        android:orientation="vertical"
+                        android:visibility="gone"
+                        tools:visibility="visible">
+                        <Spinner
+                            android:id="@+id/sorting_spinner"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:layout_marginBottom="8dp"/>
+                        <ProgressBar
+                            android:id="@+id/videos_loading"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center_horizontal"/>
+                        <TextView
+                            android:id="@+id/no_videos"
+                            android:layout_width="fill_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center"
+                            android:text="@string/no_videos"
+                            android:padding="16dp"
+                            android:visibility="gone"/>
+                        <GridView
+                            android:id="@+id/videos_list"
+                            android:layout_width="fill_parent"
+                            android:layout_height="fill_parent"
+                            android:numColumns="auto_fit"
+                            android:columnWidth="280dp"
+                            android:stretchMode="columnWidth"
+                            android:verticalSpacing="20dp"
+                            android:horizontalSpacing="20dp"
+                            android:paddingLeft="24dp"
+                            android:paddingRight="24dp"
+                            android:clipToPadding="false"
+                            android:scrollbarStyle="outsideOverlay"
+                            android:clickable="true"
+                            android:choiceMode="none"
+                            android:visibility="gone"
+                            tools:visibility="visible"
+                            tools:listitem="@layout/item_video_compact"/>
+                    </LinearLayout>
+
+                </FrameLayout>
+            </LinearLayout>
+        </io.github.gohoski.notpipe.ui.FixedTabHost>
+    </FrameLayout>
+</LinearLayout>

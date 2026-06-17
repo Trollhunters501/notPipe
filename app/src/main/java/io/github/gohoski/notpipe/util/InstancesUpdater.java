@@ -12,7 +12,6 @@ import cc.nnproject.json.JSONArray;
 import cc.nnproject.json.JSONObject;
 import io.github.gohoski.notpipe.api.Manager;
 import io.github.gohoski.notpipe.api.Metadata;
-import io.github.gohoski.notpipe.api.Trending;
 import io.github.gohoski.notpipe.config.Config;
 import io.github.gohoski.notpipe.config.ConfigManager;
 import io.github.gohoski.notpipe.http.HttpClient;
@@ -66,7 +65,8 @@ public class InstancesUpdater {
                         new HttpRequest(config.getInstancesUpdateUrl())));
                 JSONArray ytApiLegacy = obj.getArray("ytapilegacy"),
                         inv = obj.getArray("invidious"),
-                        yt2009 = obj.getArray("yt2009");
+                        yt2009 = obj.getArray("yt2009"),
+                        piped = obj.getArray("piped");
                 List<String> instances = new ArrayList<String>();
                 for (int i = 0; i < ytApiLegacy.size(); i++) {
                     instances.add(ytApiLegacy.getString(i));
@@ -84,6 +84,12 @@ public class InstancesUpdater {
                     instances.add(yt2009.getString(i));
                 }
                 config.setYt2009Instances(instances);
+
+                instances = new ArrayList<String>();
+                for (int i = 0; i < piped.size(); i++) {
+                    instances.add(piped.getString(i));
+                }
+                config.setPipedInstances(instances);
 
                 config.setLastUpdate(System.currentTimeMillis());
                 ConfigManager.getInstance().saveConfig(config);

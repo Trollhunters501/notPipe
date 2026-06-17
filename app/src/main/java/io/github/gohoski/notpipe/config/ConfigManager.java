@@ -18,9 +18,9 @@ public class ConfigManager {
     private static final String PREFS_NAME = "notPipe";
     private static final String KEY_INVIDIOUS = "invidious";
     private static final String KEY_YT2009 = "yt2009";
+    private static final String KEY_PIPED = "piped";
     private static final String KEY_YTAPILEGACY = "ytapilegacy";
     private static final String KEY_PREFERRED_QUALITY = "preferred_quality";
-    private static final String KEY_ENABLE_S60TUBE = "enable_s60tube";
     private static final String KEY_UPDATE_INSTANCES = "update_instances_from_url";
     private static final String KEY_INSTANCES_URL = "instances_update_url";
     private static final String KEY_UPDATE_FREQUENCY = "update_frequency";
@@ -30,6 +30,7 @@ public class ConfigManager {
     private static final String KEY_CONVERT_VIDEOS = "convert_videos";
     private static final String KEY_CONVERT_CODEC = "convert_codec";
     private static final String KEY_ASYNC_SET_VIDEO_URI = "async_set_video_uri";
+    private static final String KEY_FULLSCREEN_ROTATE = "fullscreen_rotate_landscape";
 
     private static final String SEPARATOR = ";";
 
@@ -75,9 +76,9 @@ public class ConfigManager {
 
         editor.putString(KEY_INVIDIOUS, joinList(config.getInvidiousInstances()));
         editor.putString(KEY_YT2009, joinList(config.getYt2009Instances()));
+        editor.putString(KEY_PIPED, joinList(config.getPipedInstances()));
         editor.putString(KEY_YTAPILEGACY, joinList(config.getYtApiLegacyInstances()));
         editor.putString(KEY_PREFERRED_QUALITY, config.getPreferredQuality());
-        editor.putBoolean(KEY_ENABLE_S60TUBE, config.isS60TubeEnabled());
         editor.putBoolean(KEY_UPDATE_INSTANCES, config.isUpdateInstancesFromUrl());
         editor.putString(KEY_INSTANCES_URL, config.getInstancesUpdateUrl());
         editor.putInt(KEY_UPDATE_FREQUENCY, config.getUpdateFrequency());
@@ -87,6 +88,7 @@ public class ConfigManager {
         editor.putBoolean(KEY_CONVERT_VIDEOS, config.isConvertVideos());
         editor.putInt(KEY_CONVERT_CODEC, config.getConvertCodec());
         editor.putBoolean(KEY_ASYNC_SET_VIDEO_URI, config.isAsyncSetVideoUri());
+        editor.putBoolean(KEY_FULLSCREEN_ROTATE, config.isFullscreenRotateLandscape());
         editor.commit();
     }
 
@@ -106,40 +108,42 @@ public class ConfigManager {
             config.setYt2009Instances(parseList(yt2009Str));
         }
 
+        String pipedStr = prefs.getString(KEY_PIPED, "");
+        if (pipedStr.length() > 0) {
+            config.setPipedInstances(parseList(pipedStr));
+        }
+
         String ytApiLegacyStr = prefs.getString(KEY_YTAPILEGACY, "");
         if (ytApiLegacyStr.length() > 0) {
             config.setYtApiLegacyInstances(parseList(ytApiLegacyStr));
         }
 
         config.setPreferredQuality(prefs.getString(KEY_PREFERRED_QUALITY, "360"));
-        config.setS60TubeEnabled(prefs.getBoolean(KEY_ENABLE_S60TUBE, true));
         config.setUpdateInstancesFromUrl(prefs.getBoolean(KEY_UPDATE_INSTANCES, false));
         config.setInstancesUpdateUrl(prefs.getString(KEY_INSTANCES_URL, "http://144.31.189.129/notPipe.json"));
         config.setUpdateFrequency(prefs.getInt(KEY_UPDATE_FREQUENCY, 1));
         config.setUseExternalPlayer(prefs.getBoolean(KEY_EXTERNAL_PLAYER, false));
         config.setLastUpdate(prefs.getLong(KEY_LAST_UPDATE, 0L));
         config.setAsyncSetVideoUri(prefs.getBoolean(KEY_ASYNC_SET_VIDEO_URI, NotPipe.SDK >= 14 && NotPipe.SDK <= 18));
+        config.setFullscreenRotateLandscape(prefs.getBoolean(KEY_FULLSCREEN_ROTATE, true));
 
         if (prefs.contains(KEY_CONVERT_VIDEOS)) {
             config.setStreamPlayback(prefs.getBoolean(KEY_STREAM_PLAYBACK, true));
             config.setConvertVideos(prefs.getBoolean(KEY_CONVERT_VIDEOS, false));
             config.setUseExternalPlayer(prefs.getBoolean(KEY_EXTERNAL_PLAYER, false));
+            config.setConvertCodec(prefs.getInt(KEY_CONVERT_CODEC, 0));
         } else { // First time setup
             boolean convert, stream, external;
             boolean notV7 = !Utils.isV7();
             if (NotPipe.SDK < 5 || (NotPipe.SDK < 9 && notV7)) {
-                // Android <2.0
-                // Android <2.3 and not armeabi-v7a
                 convert = true;
                 stream = false;
                 external = false;
             } else if (NotPipe.SDK < 11 && notV7) {
-                // Android <3.0 and not armeabi-v7a
                 convert = false;
                 stream = true;
                 external = true;
             } else {
-                // H.264-capable hardware defaults
                 convert = false;
                 stream = true;
                 external = false;
@@ -169,6 +173,7 @@ public class ConfigManager {
     public void ensureInstancesConfigured() {
         if (config.getInvidiousInstances().isEmpty()
                 && config.getYt2009Instances().isEmpty()
+                && config.getPipedInstances().isEmpty()
                 && config.getYtApiLegacyInstances().isEmpty()) {
             config.applyDefaults();
             saveToPrefs();
@@ -203,5 +208,4 @@ public class ConfigManager {
         }
         return sb.toString();
     }
-
 }

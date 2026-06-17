@@ -3,7 +3,7 @@
 
 Рабочий клиент YouTube для **Android 1.5+**, использующий API [Invidious](https://invidious.io), [yt2009](https://github.com/ftde0/yt2009) и [YtAPILegacy](http://yt.modyleprojects.ru). Сделан с ❤ и расчётом на долговечность. Вместо того, чтобы подключаться к одному определённому инстансу, приложение использует множество инстансов для надёжности.
 * **Telegram-канал по проекту:** [@AppDataApps](https://t.me/AppDataApps)
-* **[Retro Android Group](https://t.me/retroandroidgroup)** в Telegram
+* Заходите в наш Telegram-чат **[Retro Android](https://t.me/retroandroidgroup)**!
 
 ![notPipe](img/logo.png "Рабочий Ютуб для старых андроидов")
 
@@ -15,13 +15,12 @@
 * [Моя Интернет Страна](http://myintcountry.ru/index.php?board=android&action=display&num=1)
 * Telegram (ссылка в начале README)
 * [4PDA](https://4pda.to/forum/index.php?showtopic=1119054)
-* [Appteka](https://appteka.store/apps/0d0r273445)
-* [Lyano Market](http://market.lyano.ovh/details/?id=io.github.gohoski.notpipe)
+* [Appteka](https://appteka.store/search?q=notPipe)
 * [NeonApps](http://neonapps.ru/app.php?id=456)
 ## Возможности
 > [!NOTE]  
 > Из-за различных ограничений приложение не подключается к YouTube напрямую. Вместо этого оно подключается к различным инстансам Invidious, yt2009 и YtAPILegacy. Это также обходит ограничения YouTube, поскольку весь трафик проксируется. См. «[Зачем и как это работает](#зачем-и-как-это-работает)».
-* Тренды, поиск
+* Популярное, поиск
 * Видео, похожие видео, комментарии
 * Воспроизведение видео
 * Каналы
@@ -30,7 +29,7 @@
 * Планшетный интерфейс
 ### TODO
 * Плейлисты
-* Авторизация через yt2009/YtAPILegacy
+* Авторизация через YTFixer/yt2009 (рекомендации, подписки, история и т. д.)
 * Скачивание видео
 * Скачивание видео как музыку
 

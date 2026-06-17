@@ -23,8 +23,7 @@ public class HttpClient {
     public static final String USER_AGENT = "notPipe/" + BuildConfig.VERSION_NAME + " (https://github.com/gohoski/notPipe)";
     private static final int TIMEOUT = 20000;
     public static final int VIDEO_TIMEOUT = 60000;
-    public static final int HD_TIMEOUT = 100000;
-    public static final int CONVERSION_TIMEOUT = 360000;
+    public static final int CONVERSION_TIMEOUT = 300000;
 
     public interface DownloadProgressListener {
         void onProgress(long bytesDownloaded, long totalBytes);
@@ -52,7 +51,7 @@ public class HttpClient {
             String urlStr = url.toString().toLowerCase();
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod(request.getMethod());
-            connection.setConnectTimeout(timeout);
+            connection.setConnectTimeout(9999);
             connection.setReadTimeout(timeout);
 
             connection.setRequestProperty("User-Agent", USER_AGENT);
@@ -156,9 +155,9 @@ public class HttpClient {
     public static String getRedirectUrl(String baseUrl, String urlString, int timeout) throws IOException {
         Utils.waitForConnection(NotPipe.getAppContext());
         HttpURLConnection connection = null;
-        System.out.println(baseUrl);
         try {
             URL url = new URL(baseUrl+urlString);
+            Log.d("HttpClient", url.toString());
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(timeout);

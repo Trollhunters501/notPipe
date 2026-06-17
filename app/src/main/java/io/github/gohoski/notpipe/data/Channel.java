@@ -7,17 +7,17 @@ import java.util.List;
  */
 
 public class Channel {
-    public final String title, thumbnail, banner, description;
-    public final int subscriberCount, videoCount;
+    public final String id, title, thumbnail, banner, description;
+    public final int subscriberCount;
     public final List<VideoInfo> videos;
 
-    public Channel(String title, String thumbnail, String banner, String description, int subscriberCount, int videoCount, List<VideoInfo> videos) {
+    public Channel(String id, String title, String thumbnail, String banner, String description, int subscriberCount, List<VideoInfo> videos) {
+        this.id = id;
         this.title = title;
         this.thumbnail = thumbnail;
         this.banner = banner;
         this.description = description;
         this.subscriberCount = subscriberCount;
-        this.videoCount = videoCount;
         this.videos = videos;
     }
 
@@ -29,7 +29,6 @@ public class Channel {
                 "\n  banner='" + banner + '\'' +
                 "\n  description='" + description + '\'' +
                 "\n  subscriberCount=" + subscriberCount +
-                "\n  videoCount=" + videoCount +
                 "\n  videos=" + videos +
                 "\n}";
     }

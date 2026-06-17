@@ -3,17 +3,17 @@
     android:layout_width="fill_parent"
     android:layout_height="wrap_content"
     xmlns:tools="http://schemas.android.com/tools"
-    android:orientation="vertical"
-    android:paddingLeft="24dp"
-    android:paddingRight="24dp"
+    android:orientation="horizontal"
     android:descendantFocusability="blocksDescendants">
+    <!-- Normal portrait layout for phones -->
     <FrameLayout
-        android:layout_width="fill_parent"
+        android:layout_width="130dp"
         android:layout_height="wrap_content">
         <io.github.gohoski.notpipe.ui.AspectRatioImageView
             android:id="@+id/video_thumbnail"
             android:layout_width="fill_parent"
             android:layout_height="wrap_content"
+            android:scaleType="centerCrop"
             tools:src="@android:color/white" />
         <TextView
             android:id="@+id/duration"
@@ -33,34 +33,22 @@
     <LinearLayout
         android:layout_width="fill_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="5dip"
-        android:gravity="center_vertical">
-        <ImageView
-            android:id="@+id/channel_thumbnail"
-            android:layout_width="40dip"
-            android:layout_height="40dip"
-            android:scaleType="fitCenter"
-            android:layout_marginRight="8dip"
-            tools:src="@android:drawable/ic_popup_sync" />
-        <LinearLayout
-            android:layout_width="fill_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-            <TextView
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:paddingLeft="10dp">
+            <io.github.gohoski.notpipe.ui.EllipsizingTextView
                 android:id="@+id/video_title"
                 android:layout_width="fill_parent"
                 android:layout_height="wrap_content"
                 android:textStyle="bold"
+                tools:text="Windows Phone СЕГОДНЯ — История и его положение"
                 android:maxLines="2"
-                android:ellipsize="end"
-                tools:text="Exampletitle" />
+                android:ellipsize="end"/>
             <TextView
                 android:id="@+id/channel_title"
                 android:layout_width="fill_parent"
                 android:layout_height="wrap_content"
                 android:textSize="12sp"
-                tools:text="Goida · 12M views" />
-        </LinearLayout>
+                tools:text="Mrwhosetheboss\n999 млн.  · 4 года назад" />
     </LinearLayout>
 </LinearLayout>

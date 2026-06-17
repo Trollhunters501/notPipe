@@ -2,7 +2,7 @@ Coding agent instructions for the notPipe project—a YouTube client for legacy 
 
 ## Project Overview
 
-notPipe is a YouTube client targeting Android 1.5 (API 3) and above. It uses multiple APIs (Invidious, yt2009, YtAPILegacy) with random instance selection to combat YouTube blocks. The app uses Java 1.5 for compatibility with Android <=2.2.
+notPipe is a YouTube client targeting Android 1.5 (API 3) and above. It uses multiple APIs (Invidious, yt2009, Piped, YtAPILegacy) with random instance selection to combat YouTube blocks. The app uses Java 1.5 for compatibility with Android <=2.2.
 
 ## Build & Test Commands
 Please **do not try to use build commands** as they will not work correctly. The user will build the project by themselves.
@@ -24,7 +24,7 @@ Please **do not try to use build commands** as they will not work correctly. The
 - **Classes**: PascalCase (e.g., `VideoAdapter`, `HttpClient`)
 - **Methods/Variables**: camelCase (e.g., `getVideoUrl`, `videoInstances`)
 - **Constants**: UPPER_SNAKE_CASE (e.g., `USER_AGENT`, `TIMEOUT`)
-- **Interfaces**: PascalCase nouns (e.g., `Metadata`, `VideoStream`, `Trending`)
+- **Interfaces**: PascalCase nouns (e.g., `Metadata`, `VideoStream`)
 
 ### Imports
 - Android imports first (sorted alphabetically)
@@ -62,7 +62,7 @@ Please **do not try to use build commands** as they will not work correctly. The
 - Call `System.gc()` before opening new activities when appropriate
 
 ### API Architecture
-- All API implementations implement capability interfaces (`Metadata`, `VideoStream`, `Trending`)
+- All API implementations implement capability interfaces (`Metadata`, `VideoStream`)
 - The `Manager` singleton provides random instance selection via capability
 - Use the Manager to get API instances, never instantiate directly in activities
 
@@ -92,8 +92,7 @@ Please **do not try to use build commands** as they will not work correctly. The
 app/src/main/java/io/github/gohoski/notpipe/
 ├── api/           # API implementations (Invidious, Yt2009, YtApiLegacy)
 │   ├── Manager.java    # Singleton managing API instances
-│   ├── Metadata.java   # Interface for search/video/comments
-│   ├── Trending.java   # Interface for trending videos
+│   ├── Metadata.java   # Interface for search/video/comments/popular videos
 │   └── VideoStream.java # Interface for video URL retrieval
 ├── data/          # Data models (Video, VideoInfo, Comment)
 ├── http/          # HTTP client and utilities

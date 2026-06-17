@@ -8,8 +8,11 @@ import android.content.Context;
 import android.content.res.Resources;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.List;
+import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -18,6 +21,10 @@ import java.util.regex.Pattern;
  * Utility methods
  */
 public class Utils {
+    private static List<String> HYPE_PLAYLISTS = Arrays.asList("OLXuPDPDe3URMWBdmS4_jxdqVF08DAlAXWQ", "OLd7LoUR1ndxIsyTJ_5pK4tvrWBcvkewBLg",
+            "OLNUaVf-BhE20xpEEdOmnxF6oyKQwpN1tBQ", "OLUZ2nAWnPVwwoXomaTvbFi1Cje8td4Z0zg", "OLewrgOzMLeOADYzQ1ewNeqtPlJP20RE_Zg",
+            "OLbXum44nJ19cZmR7GxDm5rF_Nj_coRoO5g", "OLPPB3977IfFUtPW8213fFOsf2lmAWfahDg", "OLZyZj8vWFMkIOGlFzyKuFlLA2PY42VhRuA");
+
     private static Boolean isV7 = null;
 
     public static boolean isV7() {
@@ -45,6 +52,7 @@ public class Utils {
      * @return The combined URL
      */
     public static String parseUrl(String baseUrl, String url) {
+        if (url == null) return "";
         if (url.startsWith("/")) {
             return baseUrl + url;
         }
@@ -70,6 +78,7 @@ public class Utils {
      * @return Formatted duration string
      */
     public static String formatDuration(int totalSeconds) {
+        if (totalSeconds < 1) return "";
         int hours = totalSeconds / 3600;
         int minutes = (totalSeconds % 3600) / 60;
         int seconds = totalSeconds % 60;
@@ -119,66 +128,74 @@ public class Utils {
     }
 
     public static String formatNumber(Context context, long number) {
-        if (number < 1000) return String.valueOf(number);
+        long absNumber = Math.abs(number);
+        if (absNumber < 1000) return String.valueOf(number);
+
+        long divisor;
+        int suffixResId;
+        if (absNumber >= 1000000000L) {
+            divisor = 1000000000L;
+            suffixResId = R.string.billions_suffix;
+        } else if (absNumber >= 1000000L) {
+            divisor = 1000000L;
+            suffixResId = R.string.millions_suffix;
+        } else {
+            divisor = 1000L;
+            suffixResId = R.string.thousands_suffix;
+        }
 
         Resources res = context.getResources();
-        String thousands = res.getString(R.string.thousands_suffix);
-        String millions = res.getString(R.string.millions_suffix);
-        String billions = res.getString(R.string.billions_suffix);
-        String decimalSep = res.getString(R.string.decimal_separator);
+        StringBuilder sb = new StringBuilder();
+        if (number < 0) sb.append('-');
 
-        long absNumber = Math.abs(number);
-        StringBuffer sb = new StringBuffer();
-        if (number < 0) {
-            sb.append('-');
-        }
+        long whole = absNumber / divisor;
+        sb.append(whole);
 
-        if (absNumber >= 1000000000L) {
-            long value = absNumber / 1000000000L;
-            sb.append(value);
-            sb.append(billions);
-        } else if (absNumber >= 1000000L) {
-            long value = absNumber / 1000000L;
-            sb.append(value);
-            sb.append(millions);
-        } else if (absNumber >= 10000L) {
-            long value = absNumber / 1000L;
-            sb.append(value);
-            sb.append(thousands);
-        } else {
-            int truncated = (int) (absNumber / 10); // e.g. 1234 -> 123
-            int whole = truncated / 100;            // 1
-            int frac  = truncated % 100;            // 23
-
-            sb.append(whole);
+        if (whole < 10) {
+            int frac = (int) (absNumber / (divisor / 100) % 100);
             if (frac > 0) {
-                sb.append(decimalSep);
-                sb.append(frac / 10);
-                if (frac % 10 != 0) sb.append(frac % 10);
+                sb.append(res.getString(R.string.decimal_separator))
+                        .append(frac / 10);
+                if (frac % 10 != 0) {
+                    sb.append(frac % 10);
+                }
             }
-            sb.append(thousands);
         }
 
-        return sb.toString();
+        return sb.append(res.getString(suffixResId)).toString();
     }
 
     public static Date parseRelativeDate(String relativeDate) {
         if (relativeDate == null) return null;
-        String input = relativeDate.toLowerCase().trim();
+
+        String[] words = relativeDate.toLowerCase().trim().replace(" (edited)", "").split("\\s+");
+        int len = words.length;
+        int start = Math.max(0, len - 3);
+        StringBuilder sb = new StringBuilder();
+        for (int i = start; i < len; i++) {
+            sb.append(words[i]).append(" ");
+        }
+        String input = sb.toString().trim();
+
         if (input.endsWith("ago"))
             input = input.substring(0, input.length() - 3).trim();
         else if (input.endsWith("назад"))
             input = input.substring(0, input.length() - 5).trim();
         else return null;
+
         Matcher m = Pattern.compile("^(\\d+)\\s*([a-zа-яё]+)?$").matcher(input);
         if (!m.find()) return null;
-        int amount; try {
+
+        int amount;
+        try {
             amount = Integer.parseInt(m.group(1));
         } catch (NumberFormatException e) {
             return null;
         }
+
         String unit = m.group(2);
         if (unit == null || unit.length() == 0) return null;
+
         Calendar cal = Calendar.getInstance();
         switch (unit) {
             case "month": case "months": case "месяц": case "месяца": case "месяцев": case "mo":
@@ -277,5 +294,9 @@ public class Utils {
                 Thread.currentThread().interrupt();
             }
         }
+    }
+
+    public static String getHypePlaylist() {
+        return HYPE_PLAYLISTS.get(new Random().nextInt(HYPE_PLAYLISTS.size()));
     }
 }
