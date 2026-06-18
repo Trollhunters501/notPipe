@@ -26,7 +26,11 @@ public class HttpClient {
     public static final int CONVERSION_TIMEOUT = 300000;
 
     public interface DownloadProgressListener {
-        void onProgress(long bytesDownloaded, long totalBytes);
+        /**
+         * Invoked to publish downloaded bytes progression.
+         * @return true to continue downloading, false to abort and clean up.
+         */
+        boolean onProgress(long bytesDownloaded, long totalBytes);
     }
 
     @SuppressWarnings("ConstantConditions") // A notice about inputStream being null appears on Android Studio
@@ -124,6 +128,15 @@ public class HttpClient {
         try {
             in = execute(request, timeout);
             return streamToString(in);
+        } catch (HttpException e) {
+            // If the server threw a 4xx/5xx but handed us a structured JSON error payload,
+            // return it as a normal String so the API classes can extract "error" or "message".
+            String body = e.getResponseBody();
+            if (body != null) body = body.trim();
+            if (body != null && body.startsWith("{") && body.endsWith("}")) {
+                return body;
+            }
+            throw e;
         } finally {
             if (in != null) {
                 try { in.close(); } catch (IOException ignored) {}
@@ -204,9 +217,9 @@ public class HttpClient {
      * @throws IOException If there's an error downloading or saving
      */
     public static void downloadToFile(String urlString, String outputPath) throws IOException {
-        downloadToFile(urlString, outputPath, null);
+        downloadToFile(urlString, outputPath, urlString.contains("&codec=") ? CONVERSION_TIMEOUT : VIDEO_TIMEOUT, null);
     }
-    
+
     /**
      * Downloads a file from URL and saves it to the specified path with progress reporting.
      * If download fails, the partially downloaded file is deleted.
@@ -217,13 +230,27 @@ public class HttpClient {
      * @throws IOException If there's an error downloading or saving
      */
     public static void downloadToFile(String urlString, String outputPath, DownloadProgressListener listener) throws IOException {
+        downloadToFile(urlString, outputPath, urlString.contains("&codec=") ? CONVERSION_TIMEOUT : VIDEO_TIMEOUT, listener);
+    }
+
+    /**
+     * Downloads a file from URL and saves it to the specified path with custom timeout and progress reporting.
+     * If download fails, the partially downloaded file is deleted.
+     *
+     * @param urlString The URL to download from
+     * @param outputPath The file path to save to
+     * @param timeout Timeout in milliseconds
+     * @param listener Callback for download progress updates
+     * @throws IOException If there's an error downloading or saving
+     */
+    public static void downloadToFile(String urlString, String outputPath, int timeout, DownloadProgressListener listener) throws IOException {
         HttpRequest request = new HttpRequest(urlString, "");
         InputStream in = null;
         java.io.FileOutputStream out = null;
         java.io.File file = new java.io.File(outputPath);
         boolean success = false;
         try {
-            in = execute(request, urlString.contains("&codec=") ? CONVERSION_TIMEOUT : VIDEO_TIMEOUT);
+            in = execute(request, timeout);
             // Get content length if available (may be -1 for chunked transfers)
             long totalBytes = -1;
             if (in instanceof ConnectionInputStream) {
@@ -241,7 +268,9 @@ public class HttpClient {
                 out.write(buffer, 0, bytesRead);
                 bytesDownloaded += bytesRead;
                 if (listener != null) {
-                    listener.onProgress(bytesDownloaded, totalBytes);
+                    if (!listener.onProgress(bytesDownloaded, totalBytes)) {
+                        throw new IOException("Download aborted by client request.");
+                    }
                 }
             }
             out.flush();

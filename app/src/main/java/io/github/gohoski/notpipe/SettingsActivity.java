@@ -61,7 +61,7 @@ public class SettingsActivity extends Activity implements InstancesUpdater.OnIns
         convertVideosChk = (CheckBox) findViewById(R.id.convert_chk);
         convertLayout = (LinearLayout) findViewById(R.id.codec_layout);
         asyncUriChk = (CheckBox) findViewById(R.id.async_uri_chk);
-        fullscreenRotateChk = (CheckBox) findViewById(R.id.fullscreen_rotate_chk); // Bind UI
+        fullscreenRotateChk = (CheckBox) findViewById(R.id.fullscreen_rotate_chk);
 
         updateInstancesChk.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override

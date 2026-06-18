@@ -26,7 +26,7 @@ public class Config {
     private boolean asyncSetVideoUri;
     private boolean fullscreenRotateLandscape;
 
-    public Config() {
+    Config() {
         invidiousInstances = new ArrayList<String>();
         yt2009Instances = new ArrayList<String>();
         pipedInstances = new ArrayList<String>();

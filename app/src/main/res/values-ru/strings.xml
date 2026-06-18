@@ -122,4 +122,10 @@
     <string name="select_quality">Выберите качество видео</string>
     <string name="latest">Новые</string>
     <string name="popular">Популярные</string>
+    <string name="content_unavailable">Контент недоступен</string>
+    <string name="general">Основное</string>
+    <string name="force_landscape">Принудительная альбомная ориентация в полноэкранном режиме</string>
+    <string name="download_speed">%d КБ/с</string>
+    <string name="download_progress_percent">%1$d%% (%2$d КБ/с)</string>
+    <string name="download_progress_mb">%1$.1f МБ (%2$d КБ/с)</string>
 </resources>

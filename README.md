@@ -1,7 +1,7 @@
 # notPipe
 **English** / [русский](README.ru.md)
 
-A working YouTube client for **Android 1.5+** utilizing multiple backend APIs. Made with ❤ and longevity in mind. Instead of depending on a single instance that could break tomorrow, the app leverages multiple instances concurrently for maximum reliability.
+A working YouTube client for **Android 1.5+** utilizing multiple backend APIs. Made with ❤ and longevity in mind. Instead of depending on a single instance that might suddenly fail, the app leverages multiple instances concurrently for maximum reliability.
 * **Telegram channel for updates**: [@AppDataApps](https://t.me/AppDataApps)
 * Join our **[Retro Android Group](https://t.me/retroandroidgroup)** on Telegram!
 
@@ -26,12 +26,12 @@ List of supported APIs:
 
 ## Features
 > [!NOTE]   
-> Due to various limitations, the app does not connect to YouTube directly. Instead it connects to various instances of Invidious, yt2009 and YtAPILegacy. This can also bypass network restrictions of YouTube. See ["Why and how"](#why-and-how) for more information.
+> This app does not connect to YouTube directly, which can bypass various network restrictions. See ["Why and how"](#why-and-how) for more information.
 * Popular, search
 * Videos, related videos, comments
 * Video playback in 360p/480p/720p/1080p
 * Channels
-* Video conversion for devices that do not support H.264
+* Video conversion for devices that do not support H.264 to MPEG-4 Visual and H.263 codecs
 * Automatic updates of the list of instances from a URL
 * Tablet UI
 ### TODO
@@ -86,7 +86,7 @@ It is recommended to use AS while contributing; however, you may use another IDE
 Although not used as inspiration or a codebase, these other attempts of implementing YouTube deserve acknowledgment, as they led to the idea of this project.
 * [Mini YouTube by monobogdan](https://github.com/monobogdan/selfeco) — client for Android 2.0+ utilizing a hardcoded Invidious instance with requests proxied to monobogdan's Russian server. The proxy server is dead and considering it has a single point of failure, it's not worth it to compile the project with a new instance even with the proxy removed.
 * [ReOldTube by YMP Yuri](https://github.com/YMP-CO/ReOld-Tube) — client for Android 3.0+ utilizing Invidious. While it can be configured in settings to be used today, it has numerous bugs *(and is vibecoded)*.
-* [YT-Legacy-Eclair by MoreVista](https://github.com/MoreVista/YT-Legacy-Eclair) — simple client for Android 2.1+ utilizing Invidious. The instance can be changed in settings.
+* [YT-Legacy-Eclair by MoreVista](https://github.com/MoreVista/YT-Legacy-Eclair) — simple client for Android 2.1+ utilizing Invidious. The single instance can be changed in settings.
 ## License
 The **notPipe** project is licensed under the Do What The Fuck You Want To Public License, Version 2. See [LICENSE](LICENSE) for details. *If you want, you may credit me in the README of your project.*  
 

@@ -55,6 +55,7 @@ import io.github.gohoski.notpipe.config.ConfigManager;
 import io.github.gohoski.notpipe.data.Comment;
 import io.github.gohoski.notpipe.data.Video;
 import io.github.gohoski.notpipe.data.VideoInfo;
+import io.github.gohoski.notpipe.api.ContentUnavailableException;
 import io.github.gohoski.notpipe.http.HttpClient;
 import io.github.gohoski.notpipe.ui.AdapterLinearLayout;
 import io.github.gohoski.notpipe.ui.AspectRatioVideoView;
@@ -73,7 +74,7 @@ public class VideoActivity extends Activity {
     View relatedList, commentsList;
     ProgressBar relatedLoading, commentsLoading;
     ScrollView scrollView;
-    ScrollView tabsScrollView;
+    View tabsScrollView;
 
     Video video;
     List<VideoInfo> relatedVideos = new ArrayList<VideoInfo>();
@@ -487,7 +488,7 @@ public class VideoActivity extends Activity {
                 } else {
                     isUsingMetadataUrl = true;
                     videoUrl = video.videoUrl;
-                    VideoCache.putStream(videoId, videoUrl, "360", null); // Cache default metadata stream
+                    VideoCache.putStream(videoId, videoUrl, "360", null);
                     proceedPlay(videoUrl);
                 }
             }
@@ -610,7 +611,7 @@ public class VideoActivity extends Activity {
                         cancelVideoTimeout();
                         streamRetryCount = 0;
                         restoreVideoUI();
-                        thumbnail.setVisibility(View.INVISIBLE); // Keep it INVISIBLE to maintain bounding box size
+                        thumbnail.setVisibility(View.INVISIBLE);
                         play.setVisibility(View.GONE);
 
                         videoPrepared = true;
@@ -675,6 +676,32 @@ public class VideoActivity extends Activity {
                             return;
                         }
 
+                        // Determine if we were attempting to play a local cached file
+                        boolean isLocalFile = false;
+                        if (videoUrl != null && (videoUrl.startsWith(Environment.getExternalStorageDirectory().getPath()) || videoUrl.startsWith("file://"))) {
+                            isLocalFile = true;
+                        }
+
+                        if (isLocalFile) {
+                            // Local playback failed (often due to corrupted downloads or aborted conversions)
+                            try {
+                                File cachedFile = getCachedVideoFile(videoId);
+                                if (cachedFile.exists()) {
+                                    cachedFile.delete();
+                                }
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                            VideoCache.clearAll(); // Invalidate stream cache so the corrupted path is forgotten
+                            resetVideo();
+
+                            // Force automated recovery by requesting a fresh stream and triggering download/conversion
+                            showVideoLoadingUI();
+                            resolveStreamTask = new ResolveStreamTask(null);
+                            resolveStreamTask.execute(videoId);
+                            return;
+                        }
+
                         // Intercept network stream buffer drops (MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO)
                         if (what == 1 && extra == -1004) {
                             final String savedUrl = videoUrl;
@@ -722,9 +749,12 @@ public class VideoActivity extends Activity {
                         resetVideo();
                         boolean isOffline = !Utils.hasConnection(context);
 
-                        Object instanceToRemove = isUsingMetadataUrl ? api : videoStream;
-                        if (instanceToRemove != null && !isOffline) {
-                            Manager.getInstance().removeDeadInstance(instanceToRemove);
+                        // If it's a local file error, we do not declare the server instance dead
+                        if (!isLocalFile) {
+                            Object instanceToRemove = isUsingMetadataUrl ? api : videoStream;
+                            if (instanceToRemove != null && !isOffline) {
+                                Manager.getInstance().removeDeadInstance(instanceToRemove);
+                            }
                         }
                         isUsingMetadataUrl = false;
 
@@ -767,7 +797,7 @@ public class VideoActivity extends Activity {
         outState.putBoolean("videoPrepared", videoPrepared);
         outState.putBoolean("isUsingMetadataUrl", isUsingMetadataUrl);
         outState.putBoolean("isTabletFullscreen", isTabletFullscreen);
-        outState.putBoolean("isFullscreenMode", isFullscreenMode); // Persist state
+        outState.putBoolean("isFullscreenMode", isFullscreenMode);
         if (video != null) {
             outState.putString("videoUrl", videoUrl);
             outState.putString("title", video.title);
@@ -802,14 +832,12 @@ public class VideoActivity extends Activity {
             if (isFullscreenMode) {
                 if (isTablet()) {
                     exitFullscreenMode();
-//                    isTabletFullscreen = false;
                     return true;
                 } else {
                     // Phone logic
                     int currentOrientation = getResources().getConfiguration().orientation;
                     if (currentOrientation == Configuration.ORIENTATION_LANDSCAPE) {
                         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-//                        exitFullscreenMode();
                         return true;
                     } else {
                         exitFullscreenMode();
@@ -1166,7 +1194,7 @@ public class VideoActivity extends Activity {
         relatedLoading = (ProgressBar) findViewById(R.id.related_loading);
         commentsLoading = (ProgressBar) findViewById(R.id.comments_loading);
         scrollView = (ScrollView) findViewById(R.id.scroll_view);
-        tabsScrollView = (ScrollView) findViewById(R.id.tabs_scroll_view);
+        tabsScrollView = findViewById(R.id.tabs_scroll_view);
     }
 
     private void setupAdapters() {
@@ -1219,14 +1247,18 @@ public class VideoActivity extends Activity {
             public void onClick(View v) {
                 List<Manager.InstanceInfo> instances = Manager.getInstance().videoInstancesInfo();
                 if (instances.isEmpty()) return;
-
                 final List<Object> dialogItems = new ArrayList<Object>();
+                String preferredQuality = config.getPreferredQuality();
                 String currentApiType = "";
                 for (int i = 0; i < instances.size(); i++) {
                     Manager.InstanceInfo info = instances.get(i);
                     if (!info.name.equals(currentApiType)) {
                         currentApiType = info.name;
-                        dialogItems.add(currentApiType);
+                        if (!info.supportsAllQualities && !"360".equals(preferredQuality)) {
+                            dialogItems.add(currentApiType + " (360p)");
+                        } else {
+                            dialogItems.add(currentApiType);
+                        }
                     }
                     dialogItems.add(info);
                 }
@@ -1532,6 +1564,9 @@ public class VideoActivity extends Activity {
         }
     }
 
+    /**
+     * Fixes hangup found on Android 4.0-4.3 when the MediaPlayer hangs the whole UI before the server responds with a video stream
+     */
     private void executeAsyncSetVideoUri(final String targetUrl) {
         new Thread(new Runnable() {
             @Override
@@ -1553,9 +1588,7 @@ public class VideoActivity extends Activity {
                         public void run() {
                             try {
                                 videoView.setVideoURI(Uri.parse(targetUrl));
-                            } catch (Exception e) {
-                                e.printStackTrace();
-                            }
+                            } catch (Exception e) { e.printStackTrace(); }
                             videoView.requestFocus(0);
                             setupVideoTimeout();
                             videoView.requestLayout();
@@ -1686,9 +1719,7 @@ public class VideoActivity extends Activity {
                 "   " + Utils.formatTimeAgo(context, video.publishedAt));
 
         resolvedQuality = determineQuality();
-
         final String quality = resolvedQuality;
-
         if (!VideoCache.hasValidStream(videoId, quality)) {
             if (config.isConvertVideos() || !"360".equals(quality) || video.videoUrl == null || video.videoUrl.length() == 0) {
                 isUsingMetadataUrl = false;
@@ -1706,7 +1737,7 @@ public class VideoActivity extends Activity {
             isUsingMetadataUrl = (videoStream == null);
             if (videoStream != null) {
                 updatePlaybackViaText(videoStream.getHost());
-            } else if (isUsingMetadataUrl) {
+            } else {
                 updatePlaybackViaText(api.getHost());
             }
         }
@@ -1724,14 +1755,12 @@ public class VideoActivity extends Activity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        // Inflate the menu XML resource
         getMenuInflater().inflate(R.menu.menu_video, menu);
         return true;
     }
 
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
-        // Retrieve items using the IDs defined in XML
         MenuItem qualityItem = menu.findItem(R.id.action_video_quality);
         if (qualityItem != null) {
             qualityItem.setVisible(!config.isConvertVideos());
@@ -1786,7 +1815,6 @@ public class VideoActivity extends Activity {
             return;
         }
 
-        // Limit change if length exceeds 1 hour (3600 seconds) - handles criteria from determineQuality()
         if (video.length > 3600) {
             Toast.makeText(context, R.string.long_360, Toast.LENGTH_LONG).show();
             return;
@@ -1901,11 +1929,17 @@ public class VideoActivity extends Activity {
     }
 
     private class LoadVideoTask extends AsyncTask<String, Void, Video> {
+        private boolean contentUnavailable;
+
         @Override
         protected Video doInBackground(String... params) {
             try {
                 if (isCancelled()) return null;
                 return api.getVideo(params[0]);
+            } catch (ContentUnavailableException e) {
+                contentUnavailable = true;
+                e.printStackTrace();
+                return null;
             } catch (Exception e) {
                 e.printStackTrace();
                 return null;
@@ -1917,7 +1951,11 @@ public class VideoActivity extends Activity {
             if (isCancelled()) return;
             if (fetchedVideo == null) {
                 findViewById(R.id.loading).setVisibility(View.GONE);
-                Toast.makeText(context, R.string.metadata_fail, Toast.LENGTH_SHORT).show();
+                if (contentUnavailable) {
+                    Toast.makeText(context, R.string.content_unavailable, Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(context, R.string.metadata_fail, Toast.LENGTH_SHORT).show();
+                }
                 return;
             }
 
@@ -1953,7 +1991,11 @@ public class VideoActivity extends Activity {
                 }
             } else {
                 videoStream = targetInstance;
-                updatePlaybackViaText(targetInstance.getHost());
+            }
+            if (videoStream != null) {
+                updatePlaybackViaText(videoStream.getHost());
+            } else {
+                updatePlaybackViaText(api.getHost());
             }
         }
 
@@ -2049,7 +2091,7 @@ public class VideoActivity extends Activity {
                     Toast.makeText(context, "All instances failed to provide video.", Toast.LENGTH_SHORT).show();
                 } else {
                     Toast.makeText(context, R.string.no_quality, Toast.LENGTH_SHORT).show();
-                    resolvedQuality = "360"; videoBufferTimeout = 60000;
+                    /*resolvedQuality = "360";*/ videoBufferTimeout = 60000;
                     if (video != null && video.videoUrl != null && video.videoUrl.length() > 0) {
                         isUsingMetadataUrl = true;
                         updatePlaybackViaText(api.getHost());
@@ -2164,22 +2206,23 @@ public class VideoActivity extends Activity {
                 String downloadUrl = params[0];
                 File videoFile = getCachedVideoFile(videoId);
                 if (!videoFile.exists()) {
-                    HttpClient.downloadToFile(downloadUrl, videoFile.getAbsolutePath(), new HttpClient.DownloadProgressListener() {
+                    int timeout = config.isConvertVideos() ? HttpClient.CONVERSION_TIMEOUT : videoBufferTimeout;
+                    HttpClient.downloadToFile(downloadUrl, videoFile.getAbsolutePath(), timeout, new HttpClient.DownloadProgressListener() {
                         private long lastUpdateTime = 0;
                         private long lastUpdateBytes = 0;
 
                         @Override
-                        public void onProgress(final long bytesDownloaded, final long totalBytes) {
-                            if (isCancelled()) return;
+                        public boolean onProgress(final long bytesDownloaded, final long totalBytes) {
+                            if (isCancelled()) return false;
 
                             // Don't overwrite the "Converting..." label until the server starts sending data
-                            if (bytesDownloaded == 0) return;
+                            if (bytesDownloaded == 0) return true;
 
                             long currentTime = System.currentTimeMillis();
                             if (lastUpdateTime == 0) {
                                 lastUpdateTime = currentTime;
                                 lastUpdateBytes = bytesDownloaded;
-                                return;
+                                return true;
                             }
 
                             long timeElapsed = currentTime - lastUpdateTime;
@@ -2200,6 +2243,7 @@ public class VideoActivity extends Activity {
                                 lastUpdateTime = currentTime;
                                 lastUpdateBytes = bytesDownloaded;
                             }
+                            return true;
                         }
                     });
                 }
@@ -2222,13 +2266,13 @@ public class VideoActivity extends Activity {
                 int percent = values[0];
                 int speedKB = values[1];
                 if (percent >= 0) {
-                    progressView.setText(getString(R.string.percent, percent) + " (" + speedKB + " KB/s)");
+                    progressView.setText(getString(R.string.download_progress_percent, percent, speedKB));
                 } else {
                     if (values.length >= 3) {
                         double downloadedMB = values[2] / 1024.0;
-                        progressView.setText(String.format(Locale.US, "%.1f MB (%d KB/s)", downloadedMB, speedKB));
+                        progressView.setText(String.format(getString(R.string.download_progress_mb), downloadedMB, speedKB));
                     } else {
-                        progressView.setText(speedKB + " KB/s");
+                        progressView.setText(getString(R.string.download_speed, speedKB));
                     }
                 }
             } else if (values.length == 1) {

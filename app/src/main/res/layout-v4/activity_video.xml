@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <ProgressBar
+        android:id="@+id/loading"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        tools:visibility="gone"/>
+
+    <LinearLayout
+        android:id="@+id/main_content_layout"
+        android:layout_width="fill_parent"
+        android:layout_height="fill_parent"
+        android:orientation="vertical"
+        android:baselineAligned="false">
+
+        <LinearLayout
+            android:id="@+id/video_layout"
+            android:layout_width="fill_parent"
+            android:layout_height="fill_parent"
+            android:orientation="vertical"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <FrameLayout
+                android:id="@+id/video_frame"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:background="@android:color/black"
+                android:gravity="center">
+                <io.github.gohoski.notpipe.ui.AspectRatioVideoView
+                    android:id="@+id/video"
+                    android:layout_width="fill_parent"
+                    android:layout_height="fill_parent"
+                    android:layout_gravity="center"
+                    android:scaleType="fitCenter"/>
+                <io.github.gohoski.notpipe.ui.AspectRatioImageView
+                    android:id="@+id/thumbnail"
+                    android:layout_width="fill_parent"
+                    android:layout_height="wrap_content" />
+                <ImageView
+                    android:id="@+id/play"
+                    android:layout_width="80dp"
+                    android:layout_height="80dp"
+                    android:src="@android:drawable/ic_media_play"
+                    android:layout_gravity="center"/>
+                <LinearLayout
+                    android:id="@+id/video_loading"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:visibility="gone">
+                    <ProgressBar
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"/>
+                    <TextView
+                        android:id="@+id/video_progress"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone"/>
+                </LinearLayout>
+            </FrameLayout>
+
+            <ScrollView
+                android:id="@+id/scroll_view"
+                android:layout_width="fill_parent"
+                android:layout_height="fill_parent"
+                android:fillViewport="true">
+                <LinearLayout
+                    android:layout_width="fill_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/video_meta"
+                        android:layout_width="fill_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingLeft="16dp"
+                        android:paddingRight="16dp"
+                        android:paddingTop="16dp"
+                        android:gravity="top">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/title"
+                                android:layout_width="fill_parent"
+                                android:layout_height="wrap_content"
+                                android:textStyle="bold"
+                                android:textSize="16sp"
+                                android:textColor="@android:color/primary_text_dark_nodisable"
+                                tools:text="Example Title"/>
+
+                            <TextView
+                                android:id="@+id/views"
+                                android:layout_width="fill_parent"
+                                android:layout_height="wrap_content"
+                                android:textSize="12sp"
+                                tools:text="1356 views   8 days ago"/>
+
+                            <LinearLayout
+                                android:id="@+id/channel"
+                                android:layout_width="fill_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal"
+                                android:layout_marginTop="5dip"
+                                android:gravity="center_vertical">
+                                <ImageView
+                                    android:id="@+id/channel_thumbnail"
+                                    android:layout_width="40dip"
+                                    android:layout_height="40dip"
+                                    android:scaleType="fitCenter"
+                                    android:layout_marginRight="8dip"
+                                    tools:src="@android:drawable/ic_popup_sync"/>
+                                <TextView
+                                    android:id="@+id/channel_title"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textColor="@android:color/primary_text_dark"
+                                    tools:text="My channel"/>
+                                <TextView
+                                    android:id="@+id/subscribers"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textSize="12sp"
+                                    android:paddingLeft="4dp"
+                                    tools:text="1356"/>
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <ImageButton
+                            android:id="@+id/full_screen"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginLeft="16dp"
+                            android:src="@drawable/ic_full_screen"
+                            android:visibility="gone"/>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="fill_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingLeft="16dp"
+                        android:paddingRight="16dp">
+                        <Button
+                            android:id="@+id/like"
+                            android:layout_width="wrap_content"
+                            android:layout_height="fill_parent"
+                            android:drawableLeft="@drawable/ic_like"
+                            android:textSize="16sp"
+                            android:text="@string/like"
+                            tools:text="1356"/>
+
+                        <ImageButton
+                            android:id="@+id/dislike"
+                            android:layout_width="wrap_content"
+                            android:layout_height="fill_parent"
+                            android:src="@drawable/ic_dislike"/>
+
+                        <Button
+                            android:id="@+id/share"
+                            android:layout_width="wrap_content"
+                            android:layout_height="fill_parent"
+                            android:drawableLeft="@drawable/ic_share"
+                            android:text="@string/share"
+                            android:singleLine="true"/>
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/playback_info"
+                        android:layout_width="fill_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingLeft="24dp"
+                        android:paddingRight="24dp"
+                        android:paddingTop="8dp"
+                        android:paddingBottom="8dp"
+                        android:text="@string/playback_via"
+                        android:textSize="12sp"/>
+
+                    <!-- Portrait Tab Container -->
+                    <FrameLayout
+                        android:id="@+id/portrait_tab_container"
+                        android:layout_width="fill_parent"
+                        android:layout_height="wrap_content">
+
+                        <TabHost
+                            android:id="@android:id/tabhost"
+                            android:layout_width="fill_parent"
+                            android:layout_height="fill_parent">
+                            <LinearLayout
+                                android:layout_width="fill_parent"
+                                android:layout_height="fill_parent"
+                                android:orientation="vertical">
+                                <TabWidget
+                                    android:id="@android:id/tabs"
+                                    android:layout_width="fill_parent"
+                                    android:layout_height="wrap_content"
+                                    android:paddingLeft="16dp"
+                                    android:paddingRight="16dp">
+                                </TabWidget>
+                                <ScrollView
+                                    android:id="@+id/tabs_scroll_view"
+                                    android:layout_width="fill_parent"
+                                    android:layout_height="wrap_content"
+                                    android:fillViewport="true"
+                                    android:scrollbarStyle="outsideOverlay">
+                                    <FrameLayout
+                                        android:id="@android:id/tabcontent"
+                                        android:layout_width="fill_parent"
+                                        android:layout_height="wrap_content">
+                                        <LinearLayout
+                                            android:id="@+id/related"
+                                            android:layout_width="fill_parent"
+                                            android:layout_height="wrap_content"
+                                            android:orientation="vertical">
+                                            <ProgressBar
+                                                android:id="@+id/related_loading"
+                                                android:layout_width="wrap_content"
+                                                android:layout_height="wrap_content"
+                                                android:layout_gravity="center_horizontal"/>
+                                            <TextView
+                                                android:id="@+id/no_related"
+                                                android:layout_width="fill_parent"
+                                                android:layout_height="wrap_content"
+                                                android:gravity="center"
+                                                android:text="@string/no_related"
+                                                android:padding="16dp"
+                                                android:visibility="gone"/>
+                                            <io.github.gohoski.notpipe.ui.AdapterLinearLayout
+                                                android:id="@+id/related_list"
+                                                android:layout_width="fill_parent"
+                                                android:layout_height="wrap_content"
+                                                android:orientation="vertical"
+                                                android:paddingLeft="24dp"
+                                                android:paddingRight="24dp" />
+                                        </LinearLayout>
+                                        <LinearLayout
+                                            android:id="@+id/comments"
+                                            android:layout_width="fill_parent"
+                                            android:layout_height="wrap_content"
+                                            android:orientation="vertical">
+                                            <ProgressBar
+                                                android:id="@+id/comments_loading"
+                                                android:layout_width="wrap_content"
+                                                android:layout_height="wrap_content"
+                                                android:layout_gravity="center_horizontal"/>
+                                            <TextView
+                                                android:id="@+id/no_comments"
+                                                android:layout_width="fill_parent"
+                                                android:layout_height="wrap_content"
+                                                android:gravity="center"
+                                                android:text="@string/no_comments"
+                                                android:padding="16dp"
+                                                android:visibility="gone"/>
+                                            <io.github.gohoski.notpipe.ui.AdapterLinearLayout
+                                                android:id="@+id/comments_list"
+                                                android:layout_width="fill_parent"
+                                                android:layout_height="wrap_content"
+                                                android:orientation="vertical"
+                                                android:paddingLeft="15dp" />
+                                        </LinearLayout>
+                                    </FrameLayout>
+                                </ScrollView>
+                            </LinearLayout>
+                        </TabHost>
+                    </FrameLayout>
+                </LinearLayout>
+            </ScrollView>
+        </LinearLayout>
+
+        <!-- Landscape Tab Container (Tablets) -->
+        <FrameLayout
+            android:id="@+id/landscape_tab_container"
+            android:layout_width="fill_parent"
+            android:layout_height="fill_parent"
+            android:visibility="gone" />
+
+    </LinearLayout>
+</FrameLayout>

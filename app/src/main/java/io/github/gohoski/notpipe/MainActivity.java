@@ -74,7 +74,6 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
         return state;
     }
 
-    // Helper method to dynamically set adapter without relying on API 11 setAdapter() in AbsListView
     private void setAdapterForView(AbsListView view, VideoAdapter adapter) {
         if (view instanceof ListView) {
             ((ListView) view).setAdapter(adapter);
@@ -88,14 +87,13 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        listView = (AbsListView) findViewById(R.id.videos); // Changed cast to AbsListView
+        listView = (AbsListView) findViewById(R.id.videos);
         searchQuery = (AutoCompleteTextView) findViewById(R.id.search_query);
         final ImageButton searchBtn = (ImageButton) findViewById(R.id.search_btn);
         final ProgressBar loading = (ProgressBar) findViewById(R.id.loading);
         final LinearLayout noPopular = (LinearLayout) findViewById(R.id.no_popular);
         context = this;
 
-        // Hook up the scroll listener right after binding the AbsListView
         listView.setOnScrollListener(new AbsListView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(AbsListView view, int scrollState) {
@@ -191,6 +189,14 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
             public void onClick(View v) {
                 final String query = searchQuery.getText().toString().trim();
                 if (query.length() != 0) {
+                    String videoId = extractYouTubeId(query);
+                    if (videoId != null) {
+                        hideKeyboard();
+                        Intent intent = new Intent(MainActivity.this, VideoActivity.class);
+                        intent.putExtra("ID", videoId);
+                        startActivity(intent);
+                        return;
+                    }
                     searchQuery.dismissDropDown();
                     autoCompleteAdapter.setSearchActive(true);
                     isSearchMode = true;
@@ -248,6 +254,33 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
             adapter = new VideoAdapter(this, layout, videos);
             setAdapterForView(listView, adapter);
         }
+    }
+
+    private String extractYouTubeId(String query) {
+        String url = query.trim();
+        int startIndex;
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            startIndex = url.indexOf("://") + 3;
+        } else {
+            startIndex = 0;
+            url = "http://" + url;
+        }
+        String host = url.substring(startIndex);
+        int slashIndex = host.indexOf("/");
+        String domain = slashIndex >= 0 ? host.substring(0, slashIndex) : host;
+        String path = slashIndex >= 0 ? host.substring(slashIndex) : "";
+        if (domain.endsWith("youtube.com") && path.startsWith("/watch")) {
+            int vIndex = path.indexOf("v=");
+            if (vIndex >= 0) {
+                int ampIndex = path.indexOf("&", vIndex);
+                return ampIndex >= 0 ? path.substring(vIndex + 2, ampIndex) : path.substring(vIndex + 2);
+            }
+        }
+        if (domain.endsWith("youtu.be") && path.length() > 1) {
+            int slash = path.indexOf("/", 1);
+            return slash >= 0 ? path.substring(1, slash) : path.substring(1);
+        }
+        return null;
     }
 
     @Override

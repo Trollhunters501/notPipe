@@ -22,6 +22,7 @@ import android.widget.Spinner;
 import android.widget.TabHost;
 import android.widget.TabWidget;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.text.NumberFormat;
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ import java.util.List;
 import io.github.gohoski.notpipe.api.ChannelApi;
 import io.github.gohoski.notpipe.api.Manager;
 import io.github.gohoski.notpipe.api.Metadata;
+import io.github.gohoski.notpipe.api.ContentUnavailableException;
 import io.github.gohoski.notpipe.data.Channel;
 import io.github.gohoski.notpipe.data.VideoInfo;
 import io.github.gohoski.notpipe.ui.VideoAdapter;
@@ -298,6 +300,8 @@ public class ChannelActivity extends Activity {
     }
 
     private class LoadChannelTask extends AsyncTask<String, Void, Channel> {
+        private boolean contentUnavailable;
+
         @Override
         protected Channel doInBackground(String... strings) {
             try {
@@ -305,6 +309,10 @@ public class ChannelActivity extends Activity {
                 api = Manager.getInstance().getMetadata();
                 channelApi = Manager.getInstance().getChannelApi();
                 return api.getChannel(strings[0]);
+            } catch (ContentUnavailableException e) {
+                e.printStackTrace();
+                contentUnavailable = true;
+                return null;
             } catch (Exception e) {
                 e.printStackTrace();
                 return null;
@@ -316,6 +324,9 @@ public class ChannelActivity extends Activity {
             if (isCancelled() || isDestroyedFlag) return;
             if (fetched == null) {
                 findViewById(R.id.loading).setVisibility(View.GONE);
+                if (contentUnavailable) {
+                    Toast.makeText(context, R.string.content_unavailable, Toast.LENGTH_SHORT).show();
+                }
                 return;
             }
             channel = fetched;

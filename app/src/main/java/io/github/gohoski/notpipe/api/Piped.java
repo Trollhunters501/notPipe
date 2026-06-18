@@ -1,5 +1,7 @@
 package io.github.gohoski.notpipe.api;
 
+import android.util.Log;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
@@ -7,6 +9,7 @@ import java.util.List;
 
 import cc.nnproject.json.JSON;
 import cc.nnproject.json.JSONArray;
+import cc.nnproject.json.JSONException;
 import cc.nnproject.json.JSONObject;
 import io.github.gohoski.notpipe.Utils;
 import io.github.gohoski.notpipe.data.Channel;
@@ -19,9 +22,9 @@ import io.github.gohoski.notpipe.http.HttpRequest;
 /**
  * Created by Gleb on 05.06.2026.
  */
-public class Piped implements Metadata, VideoStream {
+class Piped implements Metadata, VideoStream {
     private String baseUrl, proxyUrl;
-    public Piped(String baseUrl, String proxyUrl) {
+    Piped(String baseUrl, String proxyUrl) {
         this.baseUrl = baseUrl;
         this.proxyUrl = proxyUrl;
     }
@@ -82,6 +85,13 @@ public class Piped implements Metadata, VideoStream {
     public Video getVideo(String id) throws IOException {
         HttpRequest req = new HttpRequest(baseUrl, "/streams/" + id);
         JSONObject json = JSON.getObject(HttpClient.executeToString(req));
+        try {
+            String error = json.getString("error"), message = json.getString("message");
+            Log.e("Piped", error);
+            if (error.length() > 0 && !(message.contains("bot") || message.contains("protect") || message.contains("page"))) {
+                throw new ContentUnavailableException(message);
+            }
+        } catch (JSONException ignored) {}
         List<VideoInfo> related = new ArrayList<VideoInfo>();
         JSONArray arr = json.getArray("relatedStreams");
         for (int i = 0; i < arr.size(); i++) {
@@ -146,8 +156,20 @@ public class Piped implements Metadata, VideoStream {
 
     @Override
     public Channel getChannel(String id) throws IOException {
+        if (!id.startsWith("UC")) {
+            id = JSON.getArray(HttpClient.executeToString(
+                    new HttpRequest.Builder(baseUrl, "/search")
+                            .addParam("q", id)
+                            .addParam("filter", "channels").build()
+            ))
+                    .getObject(0).getString("url").substring(9);
+        }
         HttpRequest req = new HttpRequest(baseUrl, "/channel/" + id);
         JSONObject json = JSON.getObject(HttpClient.executeToString(req));
+        try {
+            if (json.getString("error").length() > 0)
+                throw new ContentUnavailableException(json.getString("message"));
+        } catch (JSONException ignored) {}
         List<VideoInfo> videos = new ArrayList<VideoInfo>();
         JSONArray arr = json.getArray("relatedStreams");
         String thumbnail = Utils.parseUrl(proxyUrl, replaceAll(json.getString("avatarUrl"), "-no-rw?host=", "-no-rj?host=") + "&rewrite=false");

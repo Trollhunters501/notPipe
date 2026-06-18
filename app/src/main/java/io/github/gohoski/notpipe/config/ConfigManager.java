@@ -133,20 +133,14 @@ public class ConfigManager {
             config.setUseExternalPlayer(prefs.getBoolean(KEY_EXTERNAL_PLAYER, false));
             config.setConvertCodec(prefs.getInt(KEY_CONVERT_CODEC, 0));
         } else { // First time setup
-            boolean convert, stream, external;
+            boolean convert, stream, external = false;
             boolean notV7 = !Utils.isV7();
-            if (NotPipe.SDK < 5 || (NotPipe.SDK < 9 && notV7)) {
+            if (NotPipe.SDK < 5 || (NotPipe.SDK < 11 && notV7)) {
                 convert = true;
                 stream = false;
-                external = false;
-            } else if (NotPipe.SDK < 11 && notV7) {
-                convert = false;
-                stream = true;
-                external = true;
             } else {
                 convert = false;
                 stream = true;
-                external = false;
             }
             config.setConvertVideos(convert);
             config.setStreamPlayback(stream);

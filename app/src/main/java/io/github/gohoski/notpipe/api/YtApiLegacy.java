@@ -26,10 +26,10 @@ import io.github.gohoski.notpipe.http.HttpRequest;
  * Implementation of YtAPILegacy (https://github.com/ZendoMusic/yt-api-legacy)
  */
 
-public class YtApiLegacy implements Metadata, VideoStream, Conversion {
+class YtApiLegacy implements Metadata, VideoStream, Conversion {
     private String baseUrl;
 
-    public YtApiLegacy(String baseUrl) {
+    YtApiLegacy(String baseUrl) {
         this.baseUrl = baseUrl;
     }
 
@@ -94,6 +94,9 @@ public class YtApiLegacy implements Metadata, VideoStream, Conversion {
     public Video getVideo(String id) throws IOException {
         HttpRequest req = new HttpRequest.Builder(baseUrl, "/get-ytvideo-info.php").addParam("video_id", id).build();
         JSONObject json = JSON.getObject(HttpClient.executeToString(req));
+        String title = json.getString("title"), channel = json.getString("author");
+        if (title.length() == 0 && channel.length() == 0)
+            throw new ContentUnavailableException("Video unavailable");
         String dateString = json.getString("published_at");
         Date publishedAt; try {
             publishedAt = new SimpleDateFormat("MMM d, yyyy", Locale.US).parse(dateString);
@@ -129,11 +132,10 @@ public class YtApiLegacy implements Metadata, VideoStream, Conversion {
         } catch(JSONException ignored) {
             length = parseToSeconds(duration);
         }
-        String channelId = json.getString("channel_custom_url");
-        try {
-            channelId = URLDecoder.decode(channelId, "UTF-8");
-        } catch(NullPointerException ignored) {}
-        return new Video(id, json.getString("title"), Utils.parseUrl(baseUrl,json.getString("thumbnail")), json.getString("author"),
+        String channelId; try {
+            channelId = URLDecoder.decode(json.getString("channel_custom_url"), "UTF-8");
+        } catch(NullPointerException ignored) { channelId = channel; }
+        return new Video(id, title, Utils.parseUrl(baseUrl,json.getString("thumbnail")), channel,
                 Utils.parseUrl(baseUrl,json.getString("channel_thumbnail")), channelId, duration, length,
                 Long.parseLong(json.getString("views")), publishedAt, json.getString("description"), likes,
                 Integer.parseInt(json.getString("subscriberCount")), baseUrl + "/direct_url?video_id=" + id, null, comments);
@@ -192,10 +194,10 @@ public class YtApiLegacy implements Metadata, VideoStream, Conversion {
     @Override
     public Channel getChannel(String id) throws IOException {
         HttpRequest req;
-        if (id.startsWith("@"))
-            req = new HttpRequest(baseUrl, "/get_author_videos.php?author=" + id);
-        else
+        if (id.startsWith("UC"))
             req = new HttpRequest(baseUrl, "/get_author_videos_by_id.php?channel_id=" + id);
+        else
+            req = new HttpRequest(baseUrl, "/get_author_videos.php?author=" + id);
         JSONObject obj = JSON.getObject(HttpClient.executeToString(req));
         JSONArray arr = obj.getArray("videos");
         List<VideoInfo> videos = new ArrayList<VideoInfo>();

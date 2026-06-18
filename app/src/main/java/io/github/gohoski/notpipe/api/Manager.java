@@ -200,6 +200,9 @@ public class Manager {
                     successfulInstance[0] = currentInstance;
                 }
                 return url;
+            } catch (ContentUnavailableException e) {
+                e.printStackTrace();
+                throw e;
             } catch (FileNotFoundException e) {
                 throw e;
             } catch (Exception e) {
@@ -255,7 +258,9 @@ public class Manager {
                     }
                     return url;
                 } catch (Exception e) {
-                    if (e instanceof VideoTooLongException) {
+                    if (e instanceof ContentUnavailableException) {
+                        throw (ContentUnavailableException) e;
+                    } if (e instanceof VideoTooLongException) {
                         throw (VideoTooLongException) e;
                     } conversionInstances.remove(currentInstance);
                     if (isDeadInstanceError(e)) {
@@ -302,6 +307,9 @@ public class Manager {
                             try {
                                 return method.invoke(currentInstance, args);
                             } catch (InvocationTargetException e) {
+                                if (e.getCause() instanceof ContentUnavailableException) {
+                                    throw e.getCause();
+                                }
                                 e.printStackTrace();
                                 lastError = e.getCause();
                                 localPool.remove(currentInstance);

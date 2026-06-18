@@ -7,8 +7,13 @@ import android.text.StaticLayout;
 import android.util.AttributeSet;
 import android.widget.TextView;
 
+import io.github.gohoski.notpipe.NotPipe;
+
 /**
  * Created by Gleb on 11.06.2026.
+ * Custom TextView that handles multi-line ellipsizing.
+ * On API < 11 (Android 1.x/2.x), it acts as a standard TextView to avoid
+ * StackOverflowErrors on devices with tiny thread stacks (8 KB).
  */
 public class EllipsizingTextView extends TextView {
     private static final String ELLIPSIS = "...";
@@ -17,6 +22,7 @@ public class EllipsizingTextView extends TextView {
     private boolean programmaticChange = false;
     private String fullText = "";
     private int maxLines = -1;
+    private static final boolean IS_HONEYCOMB_OR_NEWER = NotPipe.SDK >= 11;
 
     public EllipsizingTextView(Context context) {
         super(context);
@@ -68,8 +74,10 @@ public class EllipsizingTextView extends TextView {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        if (isStale) {
-            resetText();
+        if (IS_HONEYCOMB_OR_NEWER) {
+            if (isStale) {
+                resetText();
+            }
         }
         super.onDraw(canvas);
     }
@@ -115,7 +123,7 @@ public class EllipsizingTextView extends TextView {
     private Layout createWorkingLayout(String workingText) {
         int width = getWidth() - getPaddingLeft() - getPaddingRight();
         if (width <= 0) {
-            width = 100; // Safe fallback value if measured width is not available yet
+            width = 100;
         }
         return new StaticLayout(
                 workingText,

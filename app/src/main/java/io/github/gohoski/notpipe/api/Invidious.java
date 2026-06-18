@@ -11,6 +11,7 @@ import java.util.TimeZone;
 
 import cc.nnproject.json.JSON;
 import cc.nnproject.json.JSONArray;
+import cc.nnproject.json.JSONException;
 import cc.nnproject.json.JSONObject;
 import io.github.gohoski.notpipe.data.Channel;
 import io.github.gohoski.notpipe.data.Comment;
@@ -25,12 +26,12 @@ import io.github.gohoski.notpipe.Utils;
  * Implementation of Invidious API (https://docs.invidious.io/api/)
  */
 
-public class Invidious implements Metadata, VideoStream {
+class Invidious implements Metadata, VideoStream {
     private String baseUrl;
     private static final int VIDEO_THUMB = 4;
     private static final int AUTHOR_THUMB = 2;
 
-    public Invidious(String baseUrl) {
+    Invidious(String baseUrl) {
         this.baseUrl = baseUrl;
     }
 
@@ -89,6 +90,12 @@ public class Invidious implements Metadata, VideoStream {
         HttpRequest req = new HttpRequest(baseUrl, "/api/v1/videos/"+id+"?local=true");
         JSONObject json = JSON.getObject(HttpClient.executeToString(req));
         List<VideoInfo> related = new ArrayList<VideoInfo>();
+        try {
+            String error = json.getString("error");
+            Log.e("Invidious", error);
+            if (!(error.contains("bot") || error.contains("protect") || error.contains("page") || error.contains("Companion")))
+                throw new ContentUnavailableException(error);
+        } catch (JSONException ignored) {}
         JSONArray arr = json.getArray("recommendedVideos");
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
         sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
@@ -177,6 +184,10 @@ public class Invidious implements Metadata, VideoStream {
         }
         HttpRequest req = new HttpRequest(baseUrl, "/api/v1/channels/"+id);
         JSONObject json = JSON.getObject(HttpClient.executeToString(req));
+        try {
+            if (json.getString("error").length() > 0)
+                throw new ContentUnavailableException("Channel unavailable");
+        } catch (JSONException ignored) {}
         List<VideoInfo> videos = parseChannelVideos(json.getArray("latestVideos"));
         JSONArray banners = json.getArray("authorBanners");
         String banner = "";

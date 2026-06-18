@@ -90,6 +90,7 @@
     <string name="download">Download</string>
     <string name="channel">Channel</string>
     <string name="no_quality">Selected quality is not available, trying 360p</string>
+    <string name="content_unavailable">This content is unavailable</string>
     <string name="metadata_fail">Failed to load video details, please try again</string>
     <string name="async_uri">Asynchronous player initialization</string>
     <string name="async_uri_">This may resolve freezing issues on some devices running Android 4.0–4.3. Enable this option if the app freezes for a few seconds before playback begins.</string>
@@ -109,4 +110,7 @@
     <string name="force_landscape">Force landscape in full-screen</string>
     <string name="latest">Latest</string>
     <string name="popular">Popular</string>
+    <string name="download_speed">%d KB/s</string>
+    <string name="download_progress_percent">%1$d%% (%2$d KB/s)</string>
+    <string name="download_progress_mb">%1$.1f MB (%2$d KB/s)</string>
 </resources>

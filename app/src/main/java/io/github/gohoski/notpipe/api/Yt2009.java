@@ -16,10 +16,10 @@ import io.github.gohoski.notpipe.http.HttpRequest;
  * Implementation of yt2009's video endpoints
  * yt2009 isn't quite designed to be used as an API—it's more a frontend, however the video endpoints and HTML are straightforward
  */
-public class Yt2009 implements VideoStream, Conversion, ChannelApi {
+ class Yt2009 implements VideoStream, Conversion, ChannelApi {
     private String baseUrl;
 
-    public Yt2009(String baseUrl) {
+    Yt2009(String baseUrl) {
         this.baseUrl = baseUrl;
     }
 
