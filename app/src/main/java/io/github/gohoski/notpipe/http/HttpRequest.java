@@ -23,7 +23,11 @@ public class HttpRequest {
     }
 
     public HttpRequest(URL url) {
-        this(url.getProtocol() + "://" + url.getHost(), url.getPath(), "GET");
+        this(
+                url.getProtocol() + "://" + url.getAuthority(),
+                url.getFile().length() < 1 ? "/" : url.getFile(),
+                "GET"
+        );
     }
 
     public HttpRequest(String baseUrl, String endpoint, String method) {
