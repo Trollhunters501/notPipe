@@ -304,7 +304,16 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
         if(event != null && event.getAction() == KeyEvent.ACTION_DOWN){
             int key = event.getKeyCode();
             if(key == KeyEvent.KEYCODE_INFO || key == KeyEvent.KEYCODE_MENU){
-                openOptionsMenu();
+                View currentFocus = getCurrentFocus();
+                if (currentFocus != null) {
+                    currentFocus.clearFocus();
+                }
+                getWindow().getDecorView().post(new Runnable() {
+                    @Override
+                    public void run() {
+                        openOptionsMenu();
+                    }
+                });
                 return true;
             }
         }
