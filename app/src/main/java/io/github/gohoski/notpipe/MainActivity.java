@@ -12,7 +12,6 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.view.PopupMenu;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
@@ -29,6 +28,7 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.PopupMenu;
 
 import java.util.Calendar;
 import java.util.List;
@@ -323,7 +323,7 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
         }
         if (tvMenu == null) {
             tvMenu = new PopupMenu(this, anchorView);
-            tvMenu.getMenuInflater().inflate(R.menu.menu_main, tvPopupMenu.getMenu());
+            tvMenu.getMenuInflater().inflate(R.menu.menu_main, tvMenu.getMenu());
             tvMenu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
                 @Override
                 public boolean onMenuItemClick(MenuItem item) {
