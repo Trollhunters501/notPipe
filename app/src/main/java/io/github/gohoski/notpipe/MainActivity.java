@@ -308,12 +308,16 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
                 if (currentFocus != null) {
                     currentFocus.clearFocus();
                 }
-                getWindow().getDecorView().post(new Runnable() {
-                    @Override
-                    public void run() {
-                        openOptionsMenu();
-                    }
-                });
+                View rootLayout = getWindow().getDecorView();
+                if(rootLayout != null){
+                    rootLayout.requestFocus();
+                    rootLayout.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            openOptionsMenu();
+                        }
+                    });
+                }
                 return true;
             }
         }
