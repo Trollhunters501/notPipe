@@ -205,10 +205,6 @@ public class ChannelActivity extends Activity {
         if(event != null && event.getAction() == KeyEvent.ACTION_DOWN){
             int key = event.getKeyCode();
             if(key == KeyEvent.KEYCODE_INFO || key == KeyEvent.KEYCODE_MENU){
-                View anchorView = findViewById(R.id.search_btn);
-                if (anchorView == null) {
-                    anchorView = getWindow().getDecorView();
-                }
                 showTvMenu();
                 return true;
             }
