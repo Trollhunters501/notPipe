@@ -51,6 +51,7 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
     private AutoCompleteTextView searchQuery;
     private AbsListView listView;
     private Context context;
+    private PopupMenu tvMenu;
     private Metadata metadata;
     private AutoCompleteAdapter autoCompleteAdapter;
     private Config config = ConfigManager.getInstance().getConfig();
@@ -304,24 +305,32 @@ public class MainActivity extends Activity implements InstancesUpdater.OnInstanc
         if(event != null && event.getAction() == KeyEvent.ACTION_DOWN){
             int key = event.getKeyCode();
             if(key == KeyEvent.KEYCODE_INFO || key == KeyEvent.KEYCODE_MENU){
-                View currentFocus = getCurrentFocus();
-                if (currentFocus != null) {
-                    currentFocus.clearFocus();
+                View anchorView = findViewById(R.id.search_btn);
+                if (anchorView == null) {
+                    anchorView = getWindow().getDecorView();
                 }
-                View rootLayout = getWindow().getDecorView();
-                if(rootLayout != null){
-                    rootLayout.requestFocus();
-                    rootLayout.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            openOptionsMenu();
-                        }
-                    });
-                }
+                showTvMenu();
                 return true;
             }
         }
         return super.dispatchKeyEvent(event);
+    }
+    private void showTvMenu() {
+        View anchorView = findViewById(R.id.search_btn);
+        if (anchorView == null) {
+            anchorView = getWindow().getDecorView();
+        }
+        if (tvMenu == null) {
+            tvMenu = new PopupMenu(this, anchorView);
+            tvMenu.getMenuInflater().inflate(R.menu.menu_main, tvPopupMenu.getMenu());
+            tvMenu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
+                @Override
+                public boolean onMenuItemClick(MenuItem item) {
+                    return onOptionsItemSelected(item);
+                }
+            });
+        }
+        tvMenu.show();
     }
 
     @Override
